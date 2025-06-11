@@ -62,7 +62,7 @@ run_kneaddata() {
         --run-fastqc-end \
         --remove-intermediate-output \
         --bowtie2-options="--very-fast" \
-        --bowtie2-options="-p 6" \
+        --bowtie2-options="-p 8" \
         --trimmomatic-options="$trimmomatic_options_string" > "$console_log" 2>&1
 
     log_info "${sample_name}: KneadData 실행 완료. 결과 파일 확인 중..."
