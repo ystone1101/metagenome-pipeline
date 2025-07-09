@@ -23,11 +23,11 @@ KRAKEN_ENV="kraken_env"
 USER_HOME="/home/kys" # <<--- 이 부분을 여러분의 홈 디렉토리로 변경!
 
 # 스레드 설정 (도구별 분리)
-KNEADDATA_THREADS=8 # KneadData (및 내부의 FastQC)에서 사용할 CPU 스레드 수
-KRAKEN2_THREADS=8   # Kraken2에서 사용할 CPU 스레드 수
+KNEADDATA_THREADS=6 # KneadData (및 내부의 FastQC)에서 사용할 CPU 스레드 수
+KRAKEN2_THREADS=6   # Kraken2에서 사용할 CPU 스레드 수
 
 # 메모리 및 Trimmomatic 설정
-KNEADDATA_MAX_MEMORY="85000m" # KneadData에 할당할 최대 메모리 (예: 80GB)
+KNEADDATA_MAX_MEMORY="80000m" # KneadData에 할당할 최대 메모리 (예: 85GB)
 # 변수에는 Trimmomatic 옵션의 '값'만 저장합니다.
 TRIMMOMATIC_OPTIONS="SLIDINGWINDOW:4:20 MINLEN:90" # Trimmomatic 옵션
 
