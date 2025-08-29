@@ -57,14 +57,13 @@ graph TD
         D --> E[Taxonomic Profiles];
     end
 
-
     subgraph Pipeline 2 - MAG Analysis
-        C --> F{De Novo Assembly};
+        C -- Cleaned Reads --> F{De Novo Assembly};
         F --> G[Contigs];
         G --> H{Binning & Refinement};
         H --> I[Refined Bins - MAGs];
-        I --> J{Taxonomic Classification};
-        I --> K{Functional Annotation};
+        I --> J{Taxonomic Classification (GTDB-Tk)};
+        I --> K{Functional Annotation (Bakta)};
         J --> L[Final Annotated MAGs];
         K --> L;
     end
