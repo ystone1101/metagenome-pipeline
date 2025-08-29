@@ -67,7 +67,7 @@ graph TD
         J --> L[Final Annotated MAGs];
         K --> L;
     end
-
+```
 -----
 
 ## Prerequisites
