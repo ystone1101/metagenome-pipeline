@@ -62,8 +62,8 @@ graph TD
         F --> G[Contigs];
         G --> H{Binning & Refinement};
         H --> I[Refined Bins - MAGs];
-        I --> J{Taxonomic Classification (GTDB-Tk)};
-        I --> K{Functional Annotation (Bakta)};
+        I --> J["Taxonomic Classification (GTDB-Tk)"];
+        I --> K["Functional Annotation (Bakta)"];
         J --> L[Final Annotated MAGs];
         K --> L;
     end
