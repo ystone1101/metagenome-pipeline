@@ -93,7 +93,7 @@ cd metagenome-pipeline
 
 #### Step 2: Create Conda Environments
 
-````markdown
+```
 \<details\>
 \<summary\>\<b\>➡️ Click here to see Conda environment setup commands\</b\>\</summary\>
 ```
