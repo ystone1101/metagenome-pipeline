@@ -49,25 +49,32 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 ## Pipeline Workflow
 
 ```mermaid
-flowchart TD
+graph TD
+    %% === 1. 파이프라인 1의 노드와 흐름 정의 ===
+    A[Input FASTQ Files] --> B{QC & Host Removal};
+    B --> C[Cleaned Reads];
+    C --> D{Taxonomic Classification};
+    D --> E[Taxonomic Profiles];
 
-    %% Pipeline 1 - QC & Taxonomy
-    subgraph P1[Pipeline 1 - QC & Taxonomy]
-        A[Input FASTQ Files] --> B{{QC & Host Removal}}
-        B --> C[Cleaned Reads]
-        C --> D{{Taxonomic Classification}}
-        D --> E[Taxonomic Profiles]
+    %% === 2. 파이프라인 2의 노드와 흐름 정의 ===
+    G{De Novo Assembly} --> H[Contigs];
+    H --> I{Binning & Refinement};
+    I --> J[Refined Bins - MAGs];
+    J --> K["Taxonomic Classification (GTDB-Tk)"];
+    J --> M["Functional Annotation (Bakta)"];
+    K --> L[Final Annotated MAGs];
+    M --> L;
+
+    %% === 3. 두 파이프라인 연결 ===
+    C -- Cleaned Reads --> G;
+
+    %% === 4. 시각적인 그룹핑 (마지막에 처리) ===
+    subgraph Pipeline 1 - QC & Taxonomy
+        A; B; C; D; E;
     end
 
-    %% Pipeline 2 - MAG Analysis
-    subgraph P2[Pipeline 2 - MAG Analysis]
-        F{{De Novo Assembly}} --> G[Contigs]
-        G --> H{{Binning & Refinement}}
-        H --> I[Refined Bins - MAGs]
-        I --> J{{Taxonomic Classification<br/>(GTDB-Tk)}}
-        I --> K{{Functional Annotation<br/>(Bakta)}}
-        J --> L[Final Annotated MAGs]
-        K --> L
+    subgraph Pipeline 2 - MAG Analysis
+        G; H; I; J; K; L; M;
     end
 ```
 -----
