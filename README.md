@@ -49,8 +49,8 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 ## Pipeline Workflow
 
 ```mermaid
-graph LR
-    %% 전체 파이프라인을 두 개의 주요 단계로 그룹화합니다.
+graph TD
+    %% === 파이프라인 1 (내부 흐름: 좌 -> 우) ===
     subgraph "Pipeline 1: QC & Taxonomic Profiling"
         direction LR
         A[Input FASTQ Files] --> B{QC & Host Removal};
@@ -59,22 +59,20 @@ graph LR
         D --> E[Taxonomic Profiles];
     end
 
+    %% === 파이프라인 2 (내부 흐름: 좌 -> 우) ===
     subgraph "Pipeline 2: MAG Assembly & Annotation"
         direction LR
         G{De Novo Assembly} --> H[Contigs];
         H --> I{Binning & Refinement};
         I --> J[Refined Bins - MAGs];
-        
-        %% MAG 분석은 두 개의 병렬 프로세스로 진행됩니다.
         J --> K["Taxonomic Classification (GTDB-Tk)"];
         J --> M["Functional Annotation (Bakta)"];
-
-        %% 두 Annotation 결과를 최종적으로 통합합니다.
         K & M --> L[Final Annotated MAGs];
     end
 
-    %% 두 파이프라인은 'Cleaned Reads'를 통해 연결됩니다.
+    %% === 연결선 (위치 고정 포함) ===
     C -- Cleaned Reads --> G;
+    E ~~~ G;
 ```
 -----
 
@@ -100,10 +98,9 @@ cd metagenome-pipeline
 
 #### Step 2: Create Conda Environments
 
-```
 \<details\>
 \<summary\>\<b\>➡️ Click here to see Conda environment setup commands\</b\>\</summary\>
-```
+
 
 The pipeline runs in several independent Conda environments. Create the required environments using the commands below. (The environment names must match those specified in the `config/*.sh` files.)
 
