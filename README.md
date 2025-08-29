@@ -1,4 +1,3 @@
-```Markdown
 <p align="center">
   <img src="https://github.com/user-attachments/assets/77e2d0ab-47d6-489f-a728-2da9cdf7af16" alt="Dokkaebi Pipeline Banner" width="750"/>
 </p>
@@ -18,15 +17,15 @@
 
 ## Table of Contents
 
--   [Overview](#overview)
--   [Key Features](#key-features)
--   [Pipeline Workflow](#pipeline-workflow)
--   [Prerequisites](#prerequisites)
--   [Installation & Setup](#installation--setup)
--   [Usage](#usage)
--   [Output Structure](#output-structure)
--   [Future Work](#future-work)
--   [License](#license)
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Pipeline Workflow](#pipeline-workflow)
+- [Prerequisites](#prerequisites)
+- [Installation & Setup](#installation--setup)
+- [Usage](#usage)
+- [Output Structure](#output-structure)
+- [Future Work](#future-work)
+- [License](#license)
 
 ***
 
@@ -38,12 +37,12 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 
 ## Key Features
 
--   **✨ All-in-One Workflow**: Flexibly execute the pipeline from raw reads to final annotated MAGs using the `qc`, `mag`, and `all` commands.
--   **🛡️ Robust & Resumable**: All scripts stop immediately upon error (`set -euo pipefail`) and provide detailed error logs. Additionally, sophisticated checkpointing using per-step success flags (`.success`) and input file checksums (`.state`) allows for safe resumption of analysis from the point of interruption.
--   **⚙️ Modular & Maintainable**: The structure, with a clear separation of functionalities (`scripts`), libraries (`lib`), and configurations (`config`), maximizes code readability and maintainability.
--   **🧪 Built-in Test Mode**: The `dokkaebi mag --test` option allows for automatic verification of the pipeline's proper functioning, making it easy to check the environment setup after installation.
--   **🎨 User-Friendly Interface**: Each pipeline visually communicates its progress with colorful logs and ASCII art, and provides detailed help messages (`--help`) to enhance usability.
--   **🌿 Isolated Conda Environments**: The tools required for each analysis step are run in independent Conda environments, fundamentally resolving dependency conflicts.
+- **✨ All-in-One Workflow**: Flexibly execute the pipeline from raw reads to final annotated MAGs using the `qc`, `mag`, and `all` commands.
+- **🛡️ Robust & Resumable**: All scripts stop immediately upon error (`set -euo pipefail`) and provide detailed error logs. Additionally, sophisticated checkpointing using per-step success flags (`.success`) and input file checksums (`.state`) allows for safe resumption of analysis from the point of interruption.
+- **⚙️ Modular & Maintainable**: The structure, with a clear separation of functionalities (`scripts`), libraries (`lib`), and configurations (`config`), maximizes code readability and maintainability.
+- **🧪 Built-in Test Mode**: The `dokkaebi mag --test` option allows for automatic verification of the pipeline's proper functioning, making it easy to check the environment setup after installation.
+- **🎨 User-Friendly Interface**: Each pipeline visually communicates its progress with colorful logs and ASCII art, and provides detailed help messages (`--help`) to enhance usability.
+- **🌿 Isolated Conda Environments**: The tools required for each analysis step are run in independent Conda environments, fundamentally resolving dependency conflicts.
 
 ***
 
@@ -68,7 +67,6 @@ graph TD
         J --> L[Final Annotated MAGs];
         K --> L;
     end
-````
 
 -----
 
