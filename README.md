@@ -51,6 +51,7 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 ```mermaid
 graph LR
     subgraph Pipeline 1 - QC & Taxonomy
+        direction LR
         A[Input FASTQ Files] --> B{QC & Host Removal};
         B --> C[Cleaned Reads];
         C --> D{Taxonomic Classification};
@@ -58,6 +59,7 @@ graph LR
     end
 
     subgraph Pipeline 2 - MAG Analysis
+        direction LR
         G{De Novo Assembly} --> H[Contigs];
         H --> I{Binning & Refinement};
         I --> J[Refined Bins - MAGs];
