@@ -49,33 +49,32 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 ## Pipeline Workflow
 
 ```mermaid
-graph TD
-    %% === 1. 파이프라인 1의 노드와 흐름 정의 ===
-    A[Input FASTQ Files] --> B{QC & Host Removal};
-    B --> C[Cleaned Reads];
-    C --> D{Taxonomic Classification};
-    D --> E[Taxonomic Profiles];
+graph LR
+    %% 전체 파이프라인을 두 개의 주요 단계로 그룹화합니다.
+    subgraph "Pipeline 1: QC & Taxonomic Profiling"
+        direction LR
+        A[Input FASTQ Files] --> B{QC & Host Removal};
+        B --> C[Cleaned Reads];
+        C --> D{Taxonomic Classification};
+        D --> E[Taxonomic Profiles];
+    end
 
-    %% === 2. 파이프라인 2의 노드와 흐름 정의 ===
-    G{De Novo Assembly} --> H[Contigs];
-    H --> I{Binning & Refinement};
-    I --> J[Refined Bins - MAGs];
-    J --> K["Taxonomic Classification (GTDB-Tk)"];
-    J --> M["Functional Annotation (Bakta)"];
-    K --> L[Final Annotated MAGs];
-    M --> L;
+    subgraph "Pipeline 2: MAG Assembly & Annotation"
+        direction LR
+        G{De Novo Assembly} --> H[Contigs];
+        H --> I{Binning & Refinement};
+        I --> J[Refined Bins - MAGs];
+        
+        %% MAG 분석은 두 개의 병렬 프로세스로 진행됩니다.
+        J --> K["Taxonomic Classification (GTDB-Tk)"];
+        J --> M["Functional Annotation (Bakta)"];
 
-    %% === 3. 두 파이프라인 연결 ===
+        %% 두 Annotation 결과를 최종적으로 통합합니다.
+        K & M --> L[Final Annotated MAGs];
+    end
+
+    %% 두 파이프라인은 'Cleaned Reads'를 통해 연결됩니다.
     C -- Cleaned Reads --> G;
-
-    %% === 4. 시각적인 그룹핑 (마지막에 처리) ===
-    subgraph Pipeline 1 - QC & Taxonomy
-        A; B; C; D; E;
-    end
-
-    subgraph Pipeline 2 - MAG Analysis
-        G; H; I; J; K; L; M;
-    end
 ```
 -----
 
