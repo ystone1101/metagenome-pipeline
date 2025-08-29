@@ -50,34 +50,42 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 
 ```mermaid
 graph TD
-    %% --- 파이프라인 1 노드 정의 ---
-    subgraph "Pipeline 1: QC & Taxonomic Profiling"
-        A[Input FASTQ Files] --> B{QC & Host Removal};
-        B --> C[Cleaned Reads];
-        C --> D{Taxonomic Classification};
-        D --> E[Taxonomic Profiles];
-    end
-    
-    %% --- 파이프라인 2 노드 정의 ---
-    subgraph "Pipeline 2: MAG Assembly & Annotation"
-        G{De Novo Assembly} --> H[Contigs];
-        H --> I{Binning & Refinement};
-        I --> J[Refined Bins - MAGs];
-        J --> K["Taxonomic Classification (GTDB-Tk)"];
-        J --> M["Functional Annotation (Bakta)"];
-        K --> L[Final Annotated MAGs];
-        M --> L;
-    end
+    %% === 1단계: 모든 노드를 미리 정의합니다 ===
+    A[Input FASTQ Files];
+    B{QC & Host Removal};
+    C[Cleaned Reads];
+    D{Taxonomic Classification};
+    E[Taxonomic Profiles];
 
-    %% --- 위치를 강제로 지정하는 부분 ---
-    % Pipeline 1의 노드들을 같은 수평선(rank)에 놓도록 강제합니다.
+    G{De Novo Assembly};
+    H[Contigs];
+    I{Binning & Refinement};
+    J[Refined Bins - MAGs];
+    K["Taxonomic Classification (GTDB-Tk)"];
+    M["Functional Annotation (Bakta)"];
+    L[Final Annotated MAGs];
+
+    %% === 2단계: 노드들의 수평 위치를 강제로 지정합니다 ===
     { rank = same; A; B; C; D; E; }
-    % Pipeline 2의 주요 노드들도 같은 수평선에 놓습니다.
     { rank = same; G; H; I; J; }
 
-
-    %% --- 파이프라인 간 연결 ---
+    %% === 3단계: 모든 연결선을 정의합니다 ===
+    % 파이프라인 1 내부 연결
+    A --> B --> C --> D --> E;
+    % 파이프라인 2 내부 연결
+    G --> H --> I --> J;
+    J --> K & M --> L;
+    % 파이프라인 간의 연결
     C -- Cleaned Reads --> G;
+
+    %% === 4단계: 마지막으로 서브그래프로 묶어 시각적으로 분리합니다 ===
+    subgraph "Pipeline 1: QC & Taxonomic Profiling"
+        A; B; C; D; E;
+    end
+
+    subgraph "Pipeline 2: MAG Assembly & Annotation"
+        G; H; I; J; K; L; M;
+    end
 ```
 -----
 
@@ -121,7 +129,7 @@ conda create -n bakta_env -c bioconda bakta -y
 # ... and other necessary tools (bbmap, samtools, etc.)
 ```
 
-</details\>
+<\details>
 
 #### Step 3: Grant Execute Permissions
 
