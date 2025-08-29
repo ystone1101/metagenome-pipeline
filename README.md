@@ -49,34 +49,34 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 ## Pipeline Workflow
 
 ```mermaid
-graph LR
-    subgraph TOP_ROW [ ]
-        direction LR
-        subgraph Pipeline 1 - QC & Taxonomy
-            A[Input FASTQ Files] --> B{QC & Host Removal};
-            B --> C[Cleaned Reads];
-            C --> D{Taxonomic Classification};
-            D --> E[Taxonomic Profiles];
-        end
+graph TD
+    subgraph Pipeline 1 - QC & Taxonomy
+        A[Input FASTQ Files]
+        --> B{QC & Host Removal}
+        --> C[Cleaned Reads]
+        --> D{Taxonomic Classification}
+        --> E[Taxonomic Profiles]
     end
 
-    subgraph BOTTOM_ROW [ ]
-        direction LR
-        subgraph Pipeline 2 - MAG Analysis
-            G{De Novo Assembly} --> H[Contigs];
-            H --> I{Binning & Refinement};
-            I --> J[Refined Bins - MAGs];
-            J --> K["Taxonomic Classification (GTDB-Tk)"];
-            J --> M["Functional Annotation (Bakta)"];
-            K --> L[Final Annotated MAGs];
-            M --> L;
+    C -- Cleaned Reads --> G
+
+    subgraph Pipeline 2 - MAG Analysis
+        G{De Novo Assembly}
+        --> H[Contigs]
+        --> I{Binning & Refinement}
+        --> J[Refined Bins - MAGs]
+
+        subgraph " "
+            direction LR
+            J --> K["Taxonomic Classification (GTDB-Tk)"]
+            J --> M["Functional Annotation (Bakta)"]
         end
+
+        K --> L[Final Annotated MAGs]
+        M --> L
     end
 
-    C -- Cleaned Reads --> G;
-
-    style TOP_ROW fill:none,stroke:none
-    style BOTTOM_ROW fill:none,stroke:none
+    style " " fill:none,stroke:none
 ```
 -----
 
