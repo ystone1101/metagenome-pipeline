@@ -49,43 +49,27 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 ## Pipeline Workflow
 
 ```mermaid
-graph TD
-    %% === 1단계: 모든 노드를 미리 정의합니다 ===
-    A[Input FASTQ Files];
-    B{QC & Host Removal};
-    C[Cleaned Reads];
-    D{Taxonomic Classification};
-    E[Taxonomic Profiles];
-
-    G{De Novo Assembly};
-    H[Contigs];
-    I{Binning & Refinement};
-    J[Refined Bins - MAGs];
-    K["Taxonomic Classification (GTDB-Tk)"];
-    M["Functional Annotation (Bakta)"];
-    L[Final Annotated MAGs];
-
-    %% === 2단계: 노드들의 수평 위치를 강제로 지정합니다 ===
-    { rank = same; A; B; C; D; E; }
-    { rank = same; G; H; I; J; }
-
-    %% === 3단계: 모든 연결선을 정의합니다 ===
-    % 파이프라인 1 내부 연결
-    A --> B --> C --> D --> E;
-    % 파이프라인 2 내부 연결
-    G --> H --> I --> J;
-    J --> K & M --> L;
-    % 파이프라인 간의 연결
-    C -- Cleaned Reads --> G;
-
-    %% === 4단계: 마지막으로 서브그래프로 묶어 시각적으로 분리합니다 ===
+graph LR
+    %% Pipeline 1
     subgraph "Pipeline 1: QC & Taxonomic Profiling"
-        A; B; C; D; E;
+        A[Input FASTQ Files] --> B{QC & Host Removal}
+        B --> C[Cleaned Reads]
+        C --> D{Taxonomic Classification}
+        D --> E[Taxonomic Profiles]
     end
 
+    %% Pipeline 2
     subgraph "Pipeline 2: MAG Assembly & Annotation"
-        G; H; I; J; K; L; M;
+        G{De Novo Assembly} --> H[Contigs]
+        H --> I{Binning & Refinement}
+        I --> J[Refined Bins - MAGs]
+        J --> K["Taxonomic Classification (GTDB-Tk)"]
+        J --> M["Functional Annotation (Bakta)"]
+        K & M --> L[Final Annotated MAGs]
     end
+
+    %% Connecting the two pipelines
+    C --> G
 ```
 -----
 
@@ -129,7 +113,7 @@ conda create -n bakta_env -c bioconda bakta -y
 # ... and other necessary tools (bbmap, samtools, etc.)
 ```
 
-<\details>
+</details>
 
 #### Step 3: Grant Execute Permissions
 
