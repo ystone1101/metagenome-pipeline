@@ -49,24 +49,25 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 ## Pipeline Workflow
 
 ```mermaid
-graph TD
-    subgraph Pipeline 1 - QC & Taxonomy
-        A[Input FASTQ Files] --> B{QC & Host Removal}
+flowchart TD
+
+    %% Pipeline 1 - QC & Taxonomy
+    subgraph P1[Pipeline 1 - QC & Taxonomy]
+        A[Input FASTQ Files] --> B{{QC & Host Removal}}
         B --> C[Cleaned Reads]
-        C --> D{Taxonomic Classification}
+        C --> D{{Taxonomic Classification}}
         D --> E[Taxonomic Profiles]
     end
 
-    C -- Cleaned Reads --> G
-
-    subgraph Pipeline 2 - MAG Analysis
-        G{De Novo Assembly} --> H[Contigs]
-        H --> I{Binning & Refinement}
-        I --> J[Refined Bins - MAGs]
-        J --> K["Taxonomic Classification (GTDB-Tk)"]
-        J --> M["Functional Annotation (Bakta)"]
-        K --> L[Final Annotated MAGs]
-        M --> L
+    %% Pipeline 2 - MAG Analysis
+    subgraph P2[Pipeline 2 - MAG Analysis]
+        F{{De Novo Assembly}} --> G[Contigs]
+        G --> H{{Binning & Refinement}}
+        H --> I[Refined Bins - MAGs]
+        I --> J{{Taxonomic Classification<br/>(GTDB-Tk)}}
+        I --> K{{Functional Annotation<br/>(Bakta)}}
+        J --> L[Final Annotated MAGs]
+        K --> L
     end
 ```
 -----
