@@ -51,32 +51,23 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 ```mermaid
 graph TD
     subgraph Pipeline 1 - QC & Taxonomy
-        A[Input FASTQ Files]
-        --> B{QC & Host Removal}
-        --> C[Cleaned Reads]
-        --> D{Taxonomic Classification}
-        --> E[Taxonomic Profiles]
+        A[Input FASTQ Files] --> B{QC & Host Removal}
+        B --> C[Cleaned Reads]
+        C --> D{Taxonomic Classification}
+        D --> E[Taxonomic Profiles]
     end
 
     C -- Cleaned Reads --> G
 
     subgraph Pipeline 2 - MAG Analysis
-        G{De Novo Assembly}
-        --> H[Contigs]
-        --> I{Binning & Refinement}
-        --> J[Refined Bins - MAGs]
-
-        subgraph " "
-            direction LR
-            J --> K["Taxonomic Classification (GTDB-Tk)"]
-            J --> M["Functional Annotation (Bakta)"]
-        end
-
+        G{De Novo Assembly} --> H[Contigs]
+        H --> I{Binning & Refinement}
+        I --> J[Refined Bins - MAGs]
+        J --> K["Taxonomic Classification (GTDB-Tk)"]
+        J --> M["Functional Annotation (Bakta)"]
         K --> L[Final Annotated MAGs]
         M --> L
     end
-
-    style " " fill:none,stroke:none
 ```
 -----
 
