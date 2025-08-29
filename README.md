@@ -50,29 +50,34 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 
 ```mermaid
 graph TD
-    %% === 파이프라인 1 (내부 흐름: 좌 -> 우) ===
+    %% --- 파이프라인 1 노드 정의 ---
     subgraph "Pipeline 1: QC & Taxonomic Profiling"
-        direction LR
         A[Input FASTQ Files] --> B{QC & Host Removal};
         B --> C[Cleaned Reads];
         C --> D{Taxonomic Classification};
         D --> E[Taxonomic Profiles];
     end
-
-    %% === 파이프라인 2 (내부 흐름: 좌 -> 우) ===
+    
+    %% --- 파이프라인 2 노드 정의 ---
     subgraph "Pipeline 2: MAG Assembly & Annotation"
-        direction LR
         G{De Novo Assembly} --> H[Contigs];
         H --> I{Binning & Refinement};
         I --> J[Refined Bins - MAGs];
         J --> K["Taxonomic Classification (GTDB-Tk)"];
         J --> M["Functional Annotation (Bakta)"];
-        K & M --> L[Final Annotated MAGs];
+        K --> L[Final Annotated MAGs];
+        M --> L;
     end
 
-    %% === 연결선 (위치 고정 포함) ===
+    %% --- 위치를 강제로 지정하는 부분 ---
+    % Pipeline 1의 노드들을 같은 수평선(rank)에 놓도록 강제합니다.
+    { rank = same; A; B; C; D; E; }
+    % Pipeline 2의 주요 노드들도 같은 수평선에 놓습니다.
+    { rank = same; G; H; I; J; }
+
+
+    %% --- 파이프라인 간 연결 ---
     C -- Cleaned Reads --> G;
-    E ~~~ G;
 ```
 -----
 
@@ -98,8 +103,8 @@ cd metagenome-pipeline
 
 #### Step 2: Create Conda Environments
 
-\<details\>
-\<summary\>\<b\>➡️ Click here to see Conda environment setup commands\</b\>\</summary\>
+<details>
+<summary><b>➡️ Click here to see Conda environment setup commands</b></summary>
 
 
 The pipeline runs in several independent Conda environments. Create the required environments using the commands below. (The environment names must match those specified in the `config/*.sh` files.)
@@ -116,7 +121,7 @@ conda create -n bakta_env -c bioconda bakta -y
 # ... and other necessary tools (bbmap, samtools, etc.)
 ```
 
-\</details\>
+</details\>
 
 #### Step 3: Grant Execute Permissions
 
