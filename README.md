@@ -40,7 +40,7 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 - **✨ All-in-One Workflow**: Flexibly execute the pipeline from raw reads to final annotated MAGs using the `qc`, `mag`, and `all` commands.
 - **🛡️ Robust & Resumable**: All scripts stop immediately upon error (`set -euo pipefail`) and provide detailed error logs. Additionally, sophisticated checkpointing using per-step success flags (`.success`) and input file checksums (`.state`) allows for safe resumption of analysis from the point of interruption.
 - **⚙️ Modular & Maintainable**: The structure, with a clear separation of functionalities (`scripts`), libraries (`lib`), and configurations (`config`), maximizes code readability and maintainability.
-- **🧪 Built-in Test Mode**: The `dokkaebi mag --test` option allows for automatic verification of the pipeline's proper functioning, making it easy to check the environment setup after installation.
+- **🧪 Built-in Test Mode**: The `dokkaebi mag --test` option allows for automatic verification of the pipeline's proper functioning and dependencies, ensuring the environment is correctly set up before running on real data.
 - **🎨 User-Friendly Interface**: Each pipeline visually communicates its progress with colorful logs and ASCII art, and provides detailed help messages (`--help`) to enhance usability.
 - **🌿 Isolated Conda Environments**: The tools required for each analysis step are run in independent Conda environments, fundamentally resolving dependency conflicts.
 
@@ -56,6 +56,7 @@ graph TD
         C --> D{Taxonomic Classification};
         D --> E[Taxonomic Profiles];
     end
+
 
     subgraph Pipeline 2 - MAG Analysis
         C --> F{De Novo Assembly};
@@ -86,14 +87,16 @@ graph TD
 #### Step 1: Clone the Repository
 
 ```bash
-git clone [https://github.com/your-username/your-repo-name.git](https://github.com/your-username/your-repo-name.git)
-cd your-repo-name
+git clone https://github.com/ystone1101/metagenome-pipeline.git
+cd metagenome-pipeline
 ```
 
 #### Step 2: Create Conda Environments
 
+````markdown
 \<details\>
 \<summary\>\<b\>➡️ Click here to see Conda environment setup commands\</b\>\</summary\>
+```
 
 The pipeline runs in several independent Conda environments. Create the required environments using the commands below. (The environment names must match those specified in the `config/*.sh` files.)
 
@@ -175,6 +178,17 @@ The Dokkaebi pipeline provides an intuitive command-line interface. All configur
     --memory_gb 100
 ```
 
+#### Example 4: Running the Automated Test
+
+To verify that all dependencies, environments, and databases are correctly configured for the MAG pipeline, you can run the built-in test mode. This will download a small public test dataset and run the complete MAG workflow on it. Note that paths to the main databases are still required to run the test.
+
+```bash
+./dokkaebi mag --test \
+    --gtdbtk_db_dir /path/to/gtdbtk_db \
+    --bakta_db_dir /path/to/bakta_db \
+    --kraken2_db /path/to/kraken2_db
+```
+    
 -----
 
 ## Output Structure
@@ -213,5 +227,3 @@ When the `all` command is executed, the specified output directory will have the
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
 
-```
-```
