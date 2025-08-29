@@ -1,0 +1,75 @@
+#!/bin/bash
+# ===============================================
+# Dokkaebi Metagenome Pipeline - Master Command
+# ===============================================
+set -euo pipefail
+
+# 스크립트의 실제 위치를 기준으로 프로젝트 폴더 경로를 찾습니다.
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+PROJECT_ROOT_DIR="$SCRIPT_DIR" 
+
+# --- 1. 메인 사용법 안내 함수 (컬러 강화 버전) ---
+print_main_usage() {
+    # 사용할 색상 코드들을 미리 변수로 정의합니다.
+    local RED=$'\033[0;31m'; local GREEN=$'\033[0;32m'; local YELLOW=$'\033[0;33m'
+    local BLUE=$'\033[0;34m'; local CYAN=$'\033[0;36m'; local BOLD=$'\033[1m'; local NC=$'\033[0m'
+
+    # ASCII Art Dokkaebi (도깨비 글자만 빨간색으로 강조)
+    echo -e "${GREEN}"
+    echo '    ██████╗  ██████╗ ██╗  ██╗██╗  ██╗ █████╗ ███████╗██████╗ ██╗'
+    echo '    ██╔══██╗██╔═══██╗██║ ██╔╝██║ ██╔╝██╔══██╗██╔════╝██╔══██╗██║'
+    echo '    ██║  ██║██║   ██║█████╔╝ █████╔╝ ███████║█████╗  ██████╔╝██║'
+    echo '    ██║  ██║██║   ██║██╔═██╗ ██╔═██╗ ██╔══██║██╔══╝  ██╔══██╗██║'
+    echo '    ██████╔╝╚██████╔╝██║  ██╗██║  ██╗██║  ██║███████╗██████╔╝██║'
+    echo '    ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝'
+    echo -e "                   ${RED}${BOLD}Metagenome Pipeline${NC}"
+    echo ""
+    
+    echo -e "  ${BOLD}A Comprehensive Metagenome Analysis Pipeline${NC}"
+    echo ""
+    echo -e "${YELLOW}The Dokkaebi pipeline transforms raw metagenomic reads into annotated MAGs.${NC}"
+    echo "It acts like a Dokkaebi, creating treasures (MAGs) from a jumble of things (reads)."
+    echo ""
+    echo -e "${CYAN}${BOLD}Usage:${NC}"
+    echo "  dokkaebi <command> [options...]"
+    echo ""
+    echo -e "${CYAN}${BOLD}Available Commands:${NC}"
+    echo -e "  ${GREEN}all${NC}             Runs the entire workflow from raw reads to final MAGs (qc + mag)."
+    echo -e "  ${GREEN}qc${NC}              Runs Pipeline 1: QC, host removal, and read-based taxonomy."
+    echo -e "  ${GREEN}mag${NC}             Runs Pipeline 2: Assembly, binning, and MAG analysis."
+    echo ""
+    echo -e "To see the specific options for a command, run:"
+    echo -e "  ${YELLOW}dokkaebi <command> --help${NC}"
+    echo ""
+    echo -e "${CYAN}${BOLD}Example:${NC}"
+    echo -e "  ${YELLOW}dokkaebi mag --help${NC}"
+    echo ""    
+    echo ""
+}
+
+# --- 2. 하위 명령어가 없거나 도움말을 요청한 경우 ---
+if [[ $# -eq 0 || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    print_main_usage
+    exit 0
+fi
+
+# --- 3. 하위 명령어 분리 ---
+SUBCOMMAND="$1"; shift
+
+# --- 4. 하위 명령어에 따라 적절한 스크립트 실행 (Dispatcher) ---
+case "$SUBCOMMAND" in
+    all)
+        bash "${PROJECT_ROOT_DIR}/scripts/run_all.sh" "$@"
+        ;;
+    qc)
+        bash "${PROJECT_ROOT_DIR}/scripts/qc.sh" "$@"
+        ;;
+    mag)
+        bash "${PROJECT_ROOT_DIR}/scripts/mag.sh" "$@"
+        ;;
+    *)
+        echo -e "\033[0;31mError: Unknown command '$SUBCOMMAND'\033[0m" >&2
+        print_main_usage
+        exit 1
+        ;;
+esac
