@@ -4,6 +4,8 @@
 #================================================
 set -euo pipefail
 
+: "${GTDBTK_DATA_PATH:=}"
+
 FULL_COMMAND_MAG="$0 \"$@\""
 
 shopt -s nullglob
