@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/77e2d0ab-47d6-489f-a728-2da9cdf7af16" alt="Dokkaebi Pipeline Banner" width="150"/>
+  <img src="https://github.com/user-attachments/assets/77e2d0ab-47d6-489f-a728-2da9cdf7af16" alt="Dokkaebi Pipeline Banner" width="300"/>
 </p>
 
 # Dokkaebi Metagenome Pipeline
