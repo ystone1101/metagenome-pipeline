@@ -122,14 +122,14 @@ KNEADDATA_LOG="${BASE_DIR}/logs/kneaddata_logs"; FASTP_REPORTS_DIR="${BASE_DIR}/
 FASTQC_REPORTS_DIR="${BASE_DIR}/logs/fastqc_reports"; FASTQC_PRE_QC_DIR="${FASTQC_REPORTS_DIR}/pre_qc"; FASTQC_POST_QC_DIR="${FASTQC_REPORTS_DIR}/post_qc"
 KRAKEN2_SUMMARY_TSV="${BASE_DIR}/kraken2_summary.tsv"; MISMATCH_FILE="${BASE_DIR}/mismatched_ids.txt"
 
-# --- 6. 디렉토리 생성 및 초기화 ---
+# --- 5. 디렉토리 생성 및 초기화 ---
 mkdir -p "$BASE_DIR" "$WORK_DIR" "$KRAKEN_OUT" "$MPA_OUT" "$CLEAN_DIR" "$KNEADDATA_LOG" \
          "$FASTP_REPORTS_DIR" "$FASTQC_PRE_QC_DIR" "$FASTQC_POST_QC_DIR" \
          "$BRACKEN_OUT" "$BRACKEN_MERGED_OUT" "$MULTIQC_OUT"
          
 if [[ ! -f "$KRAKEN2_SUMMARY_TSV" ]]; then echo -e "Sample\tTotal\tClassified\tClassified(%)\tUnclassified\tUnclassified(%)" > "$KRAKEN2_SUMMARY_TSV"; fi
 
-# --- 5. 설정 및 함수 파일 로드 ---
+# --- 6. 설정 및 함수 파일 로드 ---
 source "${PROJECT_ROOT_DIR}/config/pipeline_config.sh"
 source "${PROJECT_ROOT_DIR}/lib/pipeline_functions.sh"
 LOG_FILE="${BASE_DIR}/1_microbiome_analysis_$(date +%Y%m%d_%H%M%S).log"; > "$LOG_FILE"
@@ -155,26 +155,29 @@ if [[ "$MODE" == "environmental" ]]; then check_conda_dependency "$KNEADDATA_ENV
 check_conda_dependency "$KNEADDATA_ENV" "multiqc"
 log_info "모든 소프트웨어 의존성 확인 완료."
 
-# 체크섬 기반의 입력 파일 변경 감지 로직
-STATE_FILE="${BASE_DIR}/.pipeline.state"
-STATE_FILE_NEW="${STATE_FILE}.new"
-log_info "Checking for input file changes using checksums..."
-find "$RAW_DIR" -maxdepth 1 -type f -name "*.fastq.gz" -print0 | xargs -0 md5sum | sort -k 2 > "$STATE_FILE_NEW"
+# --- 8. 샘플별 루프 (KneadData 병렬 + Kraken2 순차 하이브리드 적용) ---
+# [설정] 슬롯 개수 정의
+MAX_KNEAD_JOBS=4   # KneadData 동시 실행 수
+MAX_KRAKEN_JOBS=1  # Kraken2 동시 실행 수 (메모리 보호)
+MAX_PENDING_JOBS=20 # 대기열 제한 
 
-if [ -f "$STATE_FILE" ] && diff -q "$STATE_FILE" "$STATE_FILE_NEW" >/dev/null; then
-    log_info "No changes detected in input files. QC pipeline is up-to-date."
-    rm -f "$STATE_FILE_NEW"
-    exit 0 # 변경사항이 없으면 여기서 성공적으로 종료
-fi
-log_info "Input file changes detected. Proceeding with analysis..."
+# 스레드 계산 (KneadData용)
+THREADS_PER_JOB=$(( THREADS / MAX_KNEAD_JOBS ))
+if (( THREADS_PER_JOB < 1 )); then THREADS_PER_JOB=1; fi
 
-# --- 8. 샘플별 루프 ---
+# 잠금 파일 저장할 임시 폴더 생성
+LOCK_DIR="${WORK_DIR}/locks"
+mkdir -p "$LOCK_DIR"
+# KneadData용 슬롯 파일 생성 (1~4번)
+for ((i=1; i<=MAX_KNEAD_JOBS; i++)); do touch "${LOCK_DIR}/knead_slot_${i}"; done
+
+log_info "Starting Pipeline Loop..."
+#log_info "Strategy: KneadData ($MAX_KNEAD_JOBS parallel) -> Release -> Kraken2 ($MAX_KRAKEN_JOBS serial)"
+
 for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
-    # --- 샘플 정보 설정 ---
-    
+    # --- 샘플 정보 파싱 --- 
     # [수정 1] R2 경로 생성 로직을 파일 끝에 고정된 단일 명령어로 단순화
     R2=$(echo "$R1" | sed -E 's/([._][Rr]?)1(\.fastq\.gz)$/\12\2/')
-
     # 2. R2 파일이 실제로 존재하는지 확인
     if [[ ! -f "$R2" ]]; then
         log_warn "R1 파일 '${R1}'에 대한 페어(R2)를 찾을 수 없습니다. 건너뜁니다."
@@ -185,7 +188,7 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
     # [수정 2] 샘플 이름 추출 로직도 더 명확하고 안전한 단일 명령어로 변경
     SAMPLE=$(basename "$R1" .fastq.gz | sed -E 's/([._][Rr]?)1$//')
 
-    printf "\n" >&2; log_info "--- 샘플 '$SAMPLE' 분석 시작 ---"
+    # printf "\n" >&2; log_info "--- 샘플 '$SAMPLE' 분석 시작 ---"
     
     # 각 단계를 위한 성공 플래그 경로를 먼저 정의합니다.
     QC_SUCCESS_FLAG="${CLEAN_DIR}/.${SAMPLE}.qc.success"
@@ -198,94 +201,158 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
         continue
     fi
 
-    # --- 1. QC 단계 (KneadData 또는 fastp) ---
-    r1_for_kraken2=""; r2_for_kraken2=""
+    # [신규 추가] 이미 처리 중인 샘플 건너뛰기
+    PROCESSING_FLAG="${CLEAN_DIR}/.${SAMPLE}.processing"
+    if [ -f "$PROCESSING_FLAG" ]; then continue; fi
+
+    # [신규 추가] 대기열 관리 (서버 과부하 방지)
+    while [ $(jobs -p | wc -l) -ge "$MAX_PENDING_JOBS" ]; do sleep 5; done
+
+    touch "$PROCESSING_FLAG"
+    log_info "[Queue] $SAMPLE added to pipeline queue."
+
+    # ===========================================================
+    #  [핵심 수정] 백그라운드 실행 그룹 (비동기 처리) 시작
+    # ===========================================================
+    (
+        # [수정] 서브쉘 내부 에러 핸들링 강화
+        set -euo pipefail
+
+        # --- 1. QC 단계 (KneadData 또는 fastp) ---
+        r1_for_kraken2=""; r2_for_kraken2=""
     
-    if [ -f "$QC_SUCCESS_FLAG" ]; then
-        log_info "${SAMPLE}: QC 단계가 이미 완료되었습니다. 건너뜁니다."
-    else
-        log_info "${SAMPLE}: 신규 QC 분석을 시작합니다."
-        cleaned_files_str="" # 결과 경로를 담을 변수 초기화
-        if [[ "$MODE" == "host" ]]; then
-            # KneadData에 사용할 스레드 수를 계산합니다. (입력된 스레드의 절반, 최소 1개 보장)
-            KNEADDATA_THREADS=$((THREADS / 2))
-            if (( KNEADDATA_THREADS < 1 )); then
-                KNEADDATA_THREADS=1
-            fi
-            log_info "Allocating ${KNEADDATA_THREADS} threads to KneadData (half of the requested ${THREADS})."
+        if [ -f "$QC_SUCCESS_FLAG" ]; then
+            log_info "${SAMPLE}: QC Already Done."
+        else
+            log_info "${SAMPLE}: 신규 QC 분석을 시작합니다."
+            MY_SLOT=""
+            while true; do
+                for ((i=1; i<=MAX_KNEAD_JOBS; i++)); do
+                    exec 9>"${LOCK_DIR}/knead_slot_${i}"
+                    if flock -n 9; then MY_SLOT=$i; break 2; fi # 성공 시 루프 탈출
+                    exec 9>&-
+                done
+                sleep 5
+            done
+
+            log_info "  [KneadData START] $SAMPLE (Slot #$MY_SLOT)"
+            #cleaned_files_str="" # 결과 경로를 담을 변수 초기화
+            
+            if [[ "$MODE" == "host" ]]; then
+                # KneadData에 사용할 스레드 수를 계산합니다. (입력된 스레드의 절반, 최소 1개 보장)
+                #KNEADDATA_THREADS=$((THREADS / 2))
+                #if (( KNEADDATA_THREADS < 1 )); then
+                KNEADDATA_THREADS=$((THREADS_PER_JOB / 2))
+                if (( KNEADDATA_THREADS < 1 )); then KNEADDATA_THREADS=1; fi
+                #log_info "Allocating ${KNEADDATA_THREADS} threads to KneadData (half of the requested ${THREADS})."
         
-            decompressed_files=($(decompress_fastq "$SAMPLE" "$R1" "$R2" "$WORK_DIR"))
-            r1_uncompressed="${decompressed_files[0]}"; r2_uncompressed="${decompressed_files[1]}"
+                decompressed_files=($(decompress_fastq "$SAMPLE" "$R1" "$R2" "$WORK_DIR"))
+                r1_uncompressed="${decompressed_files[0]}"; r2_uncompressed="${decompressed_files[1]}"
             
-            cleaned_files_str=$(run_kneaddata "$SAMPLE" "$r1_uncompressed" "$r2_uncompressed" \
-                "$HOST_DB_ARG" "$WORK_DIR" "$CLEAN_DIR" "$KNEADDATA_LOG" \
-                "$FASTQC_PRE_QC_DIR" "$FASTQC_POST_QC_DIR" \
-                "$THREADS" "$THREADS" "${MEMORY_MB}" "$TRIMMOMATIC_OPTIONS" \
-                "$KNEADDATA_EXTRA_OPTS")
-                            
-            rm "$r1_uncompressed" "$r2_uncompressed"
+            #cleaned_files_str=$(run_kneaddata "$SAMPLE" "$r1_uncompressed" "$r2_uncompressed" \
+            #    "$HOST_DB_ARG" "$WORK_DIR" "$CLEAN_DIR" "$KNEADDATA_LOG" \
+            #    "$FASTQC_PRE_QC_DIR" "$FASTQC_POST_QC_DIR" \
+            #    "$THREADS" "$THREADS" "${MEMORY_MB}" "$TRIMMOMATIC_OPTIONS" \
+            #    "$KNEADDATA_EXTRA_OPTS")
             
-        else # environmental 모드
-            run_fastqc "$FASTQC_PRE_QC_DIR" "$THREADS" "$R1" "$R2"
-            cleaned_files_str=$(run_fastp "$SAMPLE" "$R1" "$R2" "$CLEAN_DIR" "$FASTP_REPORTS_DIR" "$THREADS" "$FASTP_OPTIONS" "$FASTP_EXTRA_OPTS")
+                run_kneaddata "$SAMPLE" "$r1_uncompressed" "$r2_uncompressed" \
+                    "$HOST_DB_ARG" "$WORK_DIR" "$CLEAN_DIR" "$KNEADDATA_LOG" \
+                    "$FASTQC_PRE_QC_DIR" "$FASTQC_POST_QC_DIR" \
+                    "$KNEADDATA_THREADS" "$KNEADDATA_THREADS" "${MEMORY_MB}" "$TRIMMOMATIC_OPTIONS" \
+                    "$KNEADDATA_EXTRA_OPTS" > /dev/null
 
-            # Post-QC FastQC 실행
-            read -r r1_cleaned r2_cleaned <<< "$cleaned_files_str"
-            if [[ -f "$r1_cleaned" ]]; then
-                 log_info "${SAMPLE}: Running Post-QC FastQC on fastp outputs..."
-                 run_fastqc "$FASTQC_POST_QC_DIR" "$THREADS" "$r1_cleaned" "$r2_cleaned"
-            fi
+                rm "$r1_uncompressed" "$r2_uncompressed"
+            
+            else # environmental 모드
+                run_fastqc "$FASTQC_PRE_QC_DIR" "$THREADS_PER_JOB" "$R1" "$R2"
+                cleaned_files_str=$(run_fastp "$SAMPLE" "$R1" "$R2" "$CLEAN_DIR" "$FASTP_REPORTS_DIR" "$THREADS_PER_JOB" "$FASTP_OPTIONS" "$FASTP_EXTRA_OPTS")
 
-            # Environmental 모드 안에서 QC 결과물 확인
-            read -r -a cleaned_files <<< "$cleaned_files_str"
-            if [[ -z "${cleaned_files[0]}" ]]; then
-                log_warn "fastp 결과 파일이 생성되지 않았습니다. 샘플을 건너뜁니다."
-                continue
+                # Post-QC FastQC 실행
+                read -r r1_cleaned r2_cleaned <<< "$cleaned_files_str"
+                if [[ -n "$r1_cleaned" && -f "$r1_cleaned" ]]; then
+                     run_fastqc "$FASTQC_POST_QC_DIR" "$THREADS_PER_JOB" "$r1_cleaned" "$r2_cleaned"
+                else
+                     log_error "${SAMPLE}: fastp output not found."
+                     flock -u 9; exec 9>&- # 슬롯 반납 필수
+                     rm -f "$PROCESSING_FLAG"; exit 1
+                fi
+                # Environmental 모드 안에서 QC 결과물 확인
+                #read -r -a cleaned_files <<< "$cleaned_files_str"
+                #if [[ -z "${cleaned_files[0]}" ]]; then
+                #    log_warn "fastp 결과 파일이 생성되지 않았습니다. 샘플을 건너뜁니다."
+                #    continue
+                #fi
             fi
-        fi
       
-        # QC 단계가 성공적으로 끝나면 성공 플래그를 생성합니다.
-        touch "$QC_SUCCESS_FLAG"
-        log_info "${SAMPLE}: QC 단계 완료."
-    fi
+            # QC 단계가 성공적으로 끝나면 성공 플래그를 생성합니다.
+            touch "$QC_SUCCESS_FLAG"
+            log_info "  [KneadData DONE] $SAMPLE (Slot #$MY_SLOT released)"
 
-    # --- QC-ONLY 모드 분기점 ---
-    if [ "$QC_ONLY_MODE" = true ]; then
-        log_info "${SAMPLE}: QC-only mode enabled. Skipping Kraken2/Bracken analysis."
-        continue
-    fi
+            # [신규 추가] 슬롯 반납 (중요!)
+            flock -u 9
+            exec 9>&-
+        fi
 
-    # QC를 건너뛰었든, 새로 실행했든, 다음 단계에 필요한 파일 경로를 확정합니다.
-    if [[ "$MODE" == "host" ]]; then
-        r1_for_kraken2="${CLEAN_DIR}/${SAMPLE}_1_kneaddata_paired_1.fastq.gz"
-        r2_for_kraken2="${CLEAN_DIR}/${SAMPLE}_1_kneaddata_paired_2.fastq.gz"
-    else
-        r1_for_kraken2="${CLEAN_DIR}/${SAMPLE}_fastp_1.fastq.gz"
-        r2_for_kraken2="${CLEAN_DIR}/${SAMPLE}_fastp_2.fastq.gz"
-    fi
-    if [[ ! -f "$r1_for_kraken2" ]]; then log_error "QC 결과 파일이 없어 Kraken2를 실행할 수 없습니다."; continue; fi
+        # --- QC-ONLY 모드 분기점 ---
+        if [ "$QC_ONLY_MODE" = true ]; then
+            #log_info "${SAMPLE}: QC-only mode enabled. Skipping Kraken2/Bracken analysis."
+            rm -f "$PROCESSING_FLAG" 
+            exit 0
+        fi
 
-
-    # --- 2. Kraken2 단계 ---
-    final_kraken_report="${KRAKEN_OUT}/${SAMPLE}.k2report"
+        # QC를 건너뛰었든, 새로 실행했든, 다음 단계에 필요한 파일 경로를 확정합니다.
+        if [[ "$MODE" == "host" ]]; then
+            r1_for_kraken2="${CLEAN_DIR}/${SAMPLE}_1_kneaddata_paired_1.fastq.gz"
+            r2_for_kraken2="${CLEAN_DIR}/${SAMPLE}_1_kneaddata_paired_2.fastq.gz"
+        else
+            r1_for_kraken2="${CLEAN_DIR}/${SAMPLE}_fastp_1.fastq.gz"
+            r2_for_kraken2="${CLEAN_DIR}/${SAMPLE}_fastp_2.fastq.gz"
+        fi
     
-    if [ -f "$KRAKEN2_SUCCESS_FLAG" ]; then
-        log_info "${SAMPLE}: Kraken2 단계가 이미 완료되었습니다. 건너뜁니다."
-    else
-        log_info "${SAMPLE}: Kraken2 분석을 시작합니다."
-        run_kraken2 "$SAMPLE" "$r1_for_kraken2" "$r2_for_kraken2" "$KRAKEN2_DB_ARG" "$KRAKEN_OUT" "$KRAKEN2_SUMMARY_TSV" "$THREADS" "$KRAKEN2_EXTRA_OPTS"
-        touch "$KRAKEN2_SUCCESS_FLAG"
-        log_info "${SAMPLE}: Kraken2 단계 완료."
-    fi
+        if [[ ! -f "$r1_for_kraken2" ]]; then 
+            log_error "QC output not found for $SAMPLE"; rm -f "$PROCESSING_FLAG"; exit 1;
+        fi
 
-    # --- 3. Bracken 및 MPA 변환 단계 ---
-    log_info "${SAMPLE}: Bracken & MPA 변환을 시작합니다."
-    run_bracken_and_mpa "$SAMPLE" "$final_kraken_report" "$KRAKEN2_DB_ARG" "$BRACKEN_OUT" "$MPA_OUT" "$BRACKEN_READ_LEN" "$BRACKEN_THRESHOLD"
-    touch "$BRACKEN_MPA_SUCCESS_FLAG"
-    log_info "${SAMPLE}: Bracken & MPA 단계 완료."
+
+        # --- 2. Kraken2 단계 (순차 실행 적용) ---
+        final_kraken_report="${KRAKEN_OUT}/${SAMPLE}.k2report"
     
-    log_info "--- 샘플 '$SAMPLE' 처리 완료 ---"
+        #if [ -f "$KRAKEN2_SUCCESS_FLAG" ]; then
+        #    log_info "${SAMPLE}: Kraken2 단계가 이미 완료되었습니다. 건너뜁니다."
+        #else
+        if [ -f "$KRAKEN2_SUCCESS_FLAG" ]; then
+            log_info "  [Kraken2 WAIT] $SAMPLE is waiting for lock..."
+
+            # [신규 추가] Kraken2 전용 잠금 (순차 실행 보장)
+            exec 8>"${LOCK_DIR}/kraken_lock"
+            flock 8 # 대기 (Blocking)
+            
+            log_info "  [Kraken2 START] $SAMPLE (Serial)"
+            
+            # [수정] Kraken2 실행 (혼자 도니까 전체 $THREADS 사용 가능)
+            run_kraken2 "$SAMPLE" "$r1_for_kraken2" "$r2_for_kraken2" "$KRAKEN2_DB_ARG" "$KRAKEN_OUT" "$KRAKEN2_SUMMARY_TSV" "$THREADS" "$KRAKEN2_EXTRA_OPTS"
+            touch "$KRAKEN2_SUCCESS_FLAG"
+            
+            log_info "  [Kraken2 DONE] $SAMPLE"
+            flock -u 8 # 잠금 해제
+            exec 8>&-
+        fi
+
+        # --- 3. Bracken 및 MPA 변환 단계 ---
+        #log_info "${SAMPLE}: Bracken & MPA 변환을 시작합니다."
+        run_bracken_and_mpa "$SAMPLE" "$final_kraken_report" "$KRAKEN2_DB_ARG" "$BRACKEN_OUT" "$MPA_OUT" "$BRACKEN_READ_LEN" "$BRACKEN_THRESHOLD"
+        touch "$BRACKEN_MPA_SUCCESS_FLAG"
+        log_info "${SAMPLE}: Bracken & MPA 단계 완료."
+    
+        log_info "--- [ALL DONE] $SAMPLE ---"
+        rm -f "$PROCESSING_FLAG" # 처리 완료 깃발 내리기
+
+    ) &
 done
+
+# [신규 추가] 모든 작업 종료 대기
+wait
+log_info "All QC jobs finished."
 
 # --- 모든 샘플 처리 후, Bracken 결과 통합 ---
 if [ "$QC_ONLY_MODE" = false ]; then
@@ -335,7 +402,7 @@ fi
 log_info "Pre/Post QC 리포트 생성 완료. 경로: ${MULTIQC_OUT}"
 
 # 9. 완료 메시지
-mv "$STATE_FILE_NEW" "$STATE_FILE"
+#mv "$STATE_FILE_NEW" "$STATE_FILE"
 log_info "--- 모든 샘플 분석 및 결과 통합 완료 ---"
 log_info "파이프라인 종료 시간: $(date)"
 printf "\n${GREEN}### 파이프라인 결과 요약 ###${NC}\n" >&2

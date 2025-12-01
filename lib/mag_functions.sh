@@ -133,61 +133,129 @@ run_bakta_for_contigs() {
 #--- Bakta Annotation Function for MAGs (Checkpoint 강화 버전) ---
 run_bakta_for_mags() {
     local sample_name=$1; local bins_dir=$2; local out_dir=$3; local bakta_db_path=$4; local tmp_dir=$5; local extra_opts="${6}"
-    log_info "${sample_name}: Running Bakta annotation on final MAGs..."
+    
+    # === [설정] 동시 실행할 Bakta 개수 ===
+    # (주의: Bakta 하나당 메모리를 꽤 쓰므로 2~4개 추천)
+    local MAX_BAKTA_JOBS=4 
+    
+    # 전체 스레드를 작업 수로 나누기
+    local THREADS_PER_BAKTA=$(( THREADS / MAX_BAKTA_JOBS ))
+    if [[ "$THREADS_PER_BAKTA" -lt 1 ]]; then THREADS_PER_BAKTA=1; fi
+
+    log_info "${sample_name}: Running Bakta annotation on MAGs (Parallel: $MAX_BAKTA_JOBS jobs)..."
 
     mkdir -p "$out_dir"
-
     local checkpoint_file="${out_dir}/bakta_checkpoint.txt"
 
-    # --- ✨ 1. 최종 완료 여부 우선 확인 ---
-    # checkpoint 파일에 'done'이라는 완료 표시가 있으면, 더 이상 확인하지 않고 즉시 건너뜁니다.
+    # 이미 전체 완료되었는지 확인
     if [[ -f "$checkpoint_file" ]] && grep -Fxq "done" "$checkpoint_file"; then
-        log_info "All MAGs for ${sample_name} have already been annotated by Bakta (found 'done' marker). Skipping."
+        log_info "All MAGs for ${sample_name} have already been annotated. Skipping."
         return 0
     fi
-    
-    # checkpoint 파일이 없으면 새로 생성합니다.
     touch "$checkpoint_file"
     
-    # 처리할 bin 파일이 하나도 없는 경우를 대비
     local total_bins=$(ls -1 "${bins_dir}"/*.fa 2>/dev/null | wc -l)
     if [[ "$total_bins" -eq 0 ]]; then
-        log_warn "No bins found in ${bins_dir} to annotate. Marking as complete and skipping."
+        log_warn "No bins found in ${bins_dir}. Marking as complete."
         echo "done" > "$checkpoint_file"
         return 0
     fi
 
-    # 3. 각 Bin 파일에 대해 반복 작업 수행
+    # --- 병렬 루프 시작 ---
     for bin_file in "${bins_dir}"/*.fa; do
         if [[ ! -f "$bin_file" ]]; then continue; fi
         
         local base_name=$(basename "$bin_file" .fa)
         
-        # --- ✨ 2. 'done' 표시가 없을 경우, 개별 Bin 완료 여부 확인 ---
-        # checkpoint 파일에서 현재 bin 이름이 있는지 확인하고, 있으면 건너뜁니다.
-        if grep -Fxq "$base_name" "$checkpoint_file"; then
-            continue
-        fi
+        # 이미 완료된 Bin은 건너뜀
+        if grep -Fxq "$base_name" "$checkpoint_file"; then continue; fi
 
         local bakta_output_subdir="${out_dir}/${base_name}"
         local final_gff_file="${bakta_output_subdir}/${base_name}.gff3"
         
-        local bakta_options=("--threads" "$THREADS" "--skip-plot" "--tmp-dir" "$tmp_dir")
-        if [[ -n "$bakta_db_path" ]]; then
-            bakta_options+=(--db "$bakta_db_path")
-        fi
-        if [[ -d "$bakta_output_subdir" && ! -f "$final_gff_file" ]]; then
-            log_warn "Incomplete Bakta output for ${base_name}. Re-running with --force."
-            bakta_options+=(--force)
-        fi
+        local bakta_options=("--threads" "$THREADS_PER_BAKTA" "--skip-plot" "--tmp-dir" "$tmp_dir")
+        if [[ -n "$bakta_db_path" ]]; then bakta_options+=(--db "$bakta_db_path"); fi
+        if [[ -d "$bakta_output_subdir" && ! -f "$final_gff_file" ]]; then bakta_options+=(--force); fi
         
-        log_info "  - Annotating MAG: ${base_name}..."
-        if conda run -n "$BAKTA_ENV" bakta --output "$bakta_output_subdir" --prefix "$base_name" "${bakta_options[@]}" "$bin_file" $extra_opts; then
-            echo "$base_name" >> "$checkpoint_file"
-        else
-            log_warn "Bakta annotation failed for ${base_name}."
-        fi
+        # [핵심] Job Limiter: 실행 중인 작업이 꽉 찼으면 대기
+        while [ $(jobs -r | wc -l) -ge "$MAX_BAKTA_JOBS" ]; do sleep 5; done
+        
+        # [핵심] 백그라운드(&)로 실행
+        (
+            log_info "  [Start] Annotating MAG: ${base_name}"
+            if conda run -n "$BAKTA_ENV" bakta --output "$bakta_output_subdir" --prefix "$base_name" "${bakta_options[@]}" "$bin_file" $extra_opts > /dev/null 2>&1; then
+                echo "$base_name" >> "$checkpoint_file"
+            else
+                log_warn "  [Fail] Bakta annotation failed for ${base_name}."
+            fi
+        ) & 
+        
     done
+    
+    # --- 모든 작업이 끝날 때까지 대기 ---
+    wait
+    
+    # 완료 표시
+    log_info "Finished annotating all MAGs for ${sample_name}."
+    echo "done" >> "$checkpoint_file"
+}
+#run_bakta_for_mags() {
+#    local sample_name=$1; local bins_dir=$2; local out_dir=$3; local bakta_db_path=$4; local tmp_dir=$5; local extra_opts="${6}"
+#    log_info "${sample_name}: Running Bakta annotation on final MAGs..."#
+#
+#    mkdir -p "$out_dir"
+#
+#    local checkpoint_file="${out_dir}/bakta_checkpoint.txt"
+#
+#    # --- ✨ 1. 최종 완료 여부 우선 확인 ---
+#    # checkpoint 파일에 'done'이라는 완료 표시가 있으면, 더 이상 확인하지 않고 즉시 건너뜁니다.
+#    if [[ -f "$checkpoint_file" ]] && grep -Fxq "done" "$checkpoint_file"; then
+#        log_info "All MAGs for ${sample_name} have already been annotated by Bakta (found 'done' marker). Skipping."
+#        return 0
+#    fi
+#    
+#    # checkpoint 파일이 없으면 새로 생성합니다.
+#    touch "$checkpoint_file"
+#    
+#    # 처리할 bin 파일이 하나도 없는 경우를 대비
+#    local total_bins=$(ls -1 "${bins_dir}"/*.fa 2>/dev/null | wc -l)
+#    if [[ "$total_bins" -eq 0 ]]; then
+#        log_warn "No bins found in ${bins_dir} to annotate. Marking as complete and skipping."
+#        echo "done" > "$checkpoint_file"
+#        return 0
+#    fi
+#
+#    # 3. 각 Bin 파일에 대해 반복 작업 수행
+#    for bin_file in "${bins_dir}"/*.fa; do
+#        if [[ ! -f "$bin_file" ]]; then continue; fi
+#        
+#        local base_name=$(basename "$bin_file" .fa)
+#        
+#        # --- ✨ 2. 'done' 표시가 없을 경우, 개별 Bin 완료 여부 확인 ---
+#        # checkpoint 파일에서 현재 bin 이름이 있는지 확인하고, 있으면 건너뜁니다.
+#        if grep -Fxq "$base_name" "$checkpoint_file"; then
+#            continue
+#        fi
+#
+#        local bakta_output_subdir="${out_dir}/${base_name}"
+#        local final_gff_file="${bakta_output_subdir}/${base_name}.gff3"
+#        
+#        local bakta_options=("--threads" "$THREADS" "--skip-plot" "--tmp-dir" "$tmp_dir")
+#        if [[ -n "$bakta_db_path" ]]; then
+#            bakta_options+=(--db "$bakta_db_path")
+#        fi
+#        if [[ -d "$bakta_output_subdir" && ! -f "$final_gff_file" ]]; then
+#            log_warn "Incomplete Bakta output for ${base_name}. Re-running with --force."
+#            bakta_options+=(--force)
+#        fi
+#        
+#        log_info "  - Annotating MAG: ${base_name}..."
+#        if conda run -n "$BAKTA_ENV" bakta --output "$bakta_output_subdir" --prefix "$base_name" "${bakta_options[@]}" "$bin_file" $extra_opts; then
+#            echo "$base_name" >> "$checkpoint_file"
+#        else
+#            log_warn "Bakta annotation failed for ${base_name}."
+#        fi
+#    done
     
     # --- ✨ 3. 모든 작업 완료 후 'done' 표식 기록 ---
     # for 루프가 성공적으로 모두 끝나면, checkpoint 파일 마지막에 'done'을 추가합니다.

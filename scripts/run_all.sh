@@ -130,50 +130,125 @@ P1_STATE_FILE="${P1_OUTPUT_DIR}/.pipeline.state"
 # --- 파이프라인 실행 ---
 # ==========================================================
 log_info "--- Starting FULL Metagenome Pipeline ---"
-log_info "The pipeline will run in a loop, processing new samples until the input directory is stable."
+log_info "Logic: Run QC -> Check Inputs -> (If new) Repeat QC -> (If stable) Run MAG"
+log_info "The pipeline will run in a loop, processing new samples."
 
 export DOKKAEBI_MASTER_COMMAND="$FULL_COMMAND_RUN_ALL"
 
 mkdir -p "$P1_OUTPUT_DIR" "$P2_OUTPUT_DIR"
 
+# [설정] 재시도 제한 횟수
+QC_RETRY_COUNT=0
+VERIFY_RETRY_COUNT=0  # [추가] 결과물 검증 실패 카운터
+MAX_RETRIES=2
+
 while true; do
-    # --- 1단계: QC 및 분류 파이프라인 실행 ---
-    log_info "--- Starting Cycle: Running Pipeline 1 (QC & Taxonomy) ---"
-    P1_CMD_ARRAY=(
-        bash "${PROJECT_ROOT_DIR}/scripts/qc.sh"
-        "${P1_MODE}" --input_dir "${INPUT_DIR}" --output_dir "${P1_OUTPUT_DIR}"
-        --kraken2_db "${KRAKEN2_DB}" --threads "${THREADS}"
-    )
-    if [[ "$P1_MODE" == "host" ]]; then
-        P1_MEMORY_MB=$((MEMORY_GB * 1024))
-        P1_CMD_ARRAY+=(--host_db "${HOST_DB}" --memory "${P1_MEMORY_MB}")
-    fi
-    if [[ -n "$KNEADDATA_OPTS" ]]; then P1_CMD_ARRAY+=(--kneaddata-opts "$KNEADDATA_OPTS"); fi
-    if [[ -n "$FASTP_OPTS" ]]; then P1_CMD_ARRAY+=(--fastp-opts "$FASTP_OPTS"); fi
-    if [[ -n "$KRAKEN2_OPTS" ]]; then P1_CMD_ARRAY+=(--kraken2-opts "$KRAKEN2_OPTS"); fi
+    # -------------------------------------------------------
+    # [1단계] QC 무한 루프
+    # -------------------------------------------------------
+    while true; do
+        log_info "--- [Phase 1] Running QC Pipeline (Attempt: $((QC_RETRY_COUNT+1))) ---"
+    
+        P1_CMD_ARRAY=(
+            bash "${PROJECT_ROOT_DIR}/scripts/qc.sh"
+            "${P1_MODE}" --input_dir "${INPUT_DIR}" --output_dir "${P1_OUTPUT_DIR}"
+            --kraken2_db "${KRAKEN2_DB}" --threads "${THREADS}"
+        )
+        if [[ "$P1_MODE" == "host" ]]; then
+            P1_MEMORY_MB=$((MEMORY_GB * 1024))
+            P1_CMD_ARRAY+=(--host_db "${HOST_DB}" --memory "${P1_MEMORY_MB}")
+        fi
+        if [[ -n "$KNEADDATA_OPTS" ]]; then P1_CMD_ARRAY+=(--kneaddata-opts "$KNEADDATA_OPTS"); fi
+        if [[ -n "$FASTP_OPTS" ]]; then P1_CMD_ARRAY+=(--fastp-opts "$FASTP_OPTS"); fi
+        if [[ -n "$KRAKEN2_OPTS" ]]; then P1_CMD_ARRAY+=(--kraken2-opts "$KRAKEN2_OPTS"); fi
 
-    if ! "${P1_CMD_ARRAY[@]}"; then
-        log_error "Pipeline 1 failed. Aborting."
-        exit 1
-    fi
-    log_info "--- Cycle Step: Pipeline 1 finished. ---"
-    printf "\n"
+        # 2. QC 실행 및 에러 핸들링
+        if "${P1_CMD_ARRAY[@]}"; then
+            # [성공 시] 카운터 초기화
+            QC_RETRY_COUNT=0
+        else
+            # [실패 시] 카운터 증가
+            ((QC_RETRY_COUNT++))
+            log_error "QC Pipeline failed (Failure Count: $QC_RETRY_COUNT / $MAX_RETRIES)."
+        
+            # 2번 연속 실패하면 종료
+            if [ "$QC_RETRY_COUNT" -ge "$MAX_RETRIES" ]; then
+                log_error "CRITICAL: QC execution failed $MAX_RETRIES times consecutively."
+                exit 1 
+            fi
+            sleep 60; continue # 재시도
+        fi
 
-    #  파이프라인 2 시작 전, 입력 데이터(P1의 결과물) 존재 여부 확인
+        # 3. [고속 감지] QC 직후, stat 명령어로 입력 폴더 재검사 (0.1초 컷)
+        log_info "QC finished. Checking for NEW files immediately..."
+        
+        CURRENT_STATE_FILE=$(mktemp)
+        # md5sum 대신 stat 사용 (파일명, 크기, 수정시간만 확인)
+        if [[ -n "$(find "$INPUT_DIR" -maxdepth 1 -type f -name "*.fastq.gz" 2>/dev/null)" ]]; then
+            find "$INPUT_DIR" -maxdepth 1 -type f -name "*.fastq.gz" -printf "%f\t%s\t%T@\n" | sort > "$CURRENT_STATE_FILE"
+        else
+            touch "$CURRENT_STATE_FILE"
+        fi
+
+        # 상태 파일이 없으면(첫 실행) 초기화 후 MAG 진행
+        if [ ! -f "$P1_STATE_FILE" ]; then
+            mv "$CURRENT_STATE_FILE" "$P1_STATE_FILE"
+            break # 첫 사이클이므로 MAG 단계로 이동
+        fi
+
+        # 변화 비교: 새 파일 있으면 QC 다시! 없으면 MAG로!
+        if diff -q "$P1_STATE_FILE" "$CURRENT_STATE_FILE" >/dev/null; then
+            log_info "Input directory is stable. Moving to Safety Check."
+            rm -f "$CURRENT_STATE_FILE"
+            break # QC 루프 탈출 -> 안전성 검사로 이동
+        else
+            log_info "🚨 New files detected! Skipping MAG to run QC on new files first."
+            mv "$CURRENT_STATE_FILE" "$P1_STATE_FILE"
+            # continue -> 다시 위쪽 QC 실행으로 돌아감 (MAG 실행 보류)
+        fi
+    done
+
+    # -------------------------------------------------------
+    # [1.5단계] 안전장치: Pipeline 2 입력(Clean Reads) 검증
+    # -------------------------------------------------------
     log_info "Verifying inputs for Pipeline 2..."
-    # clean_reads 폴더가 비어 있고, 원본 입력 폴더에는 파일이 있는 경우에만 에러로 처리
+    
+    # Clean Reads 폴더가 비어있는데 원본 파일은 있는 경우
     if [[ ! -d "$P1_CLEAN_READS_DIR" || -z "$(ls -A "$P1_CLEAN_READS_DIR" 2>/dev/null)" ]]; then
         if [[ -n "$(find "$INPUT_DIR" -maxdepth 1 -type f -name "*.fastq.gz" 2>/dev/null)" ]]; then
-            log_error "Pipeline 2 input directory (${P1_CLEAN_READS_DIR}) is empty, but raw input files exist."
-            log_error "This indicates an issue during Pipeline 1. Please check the logs in ${P1_OUTPUT_DIR}."
-            log_error "To force Pipeline 1 to re-run, you can delete its state file: rm -f ${P1_STATE_FILE}"
-            exit 1
-        fi
-    fi
-    log_info "Inputs for Pipeline 2 verified."
+            # [수정] 여기도 카운터를 적용합니다!
+            ((VERIFY_RETRY_COUNT++))
+            
+            log_error "CRITICAL: Clean reads directory is empty (Failure Count: $VERIFY_RETRY_COUNT / $MAX_RETRIES)."
+            
+            if [ "$VERIFY_RETRY_COUNT" -ge "$MAX_RETRIES" ]; then
+                log_error "ABORTING: Pipeline 1 finished without error, but NO output was generated $MAX_RETRIES times."
+                log_error "Check disk space, permissions, or input file integrity."
+                exit 1 # 결과물 안 나옴 -> 종료
+            fi
 
-    # --- 2단계: MAG 분석 파이프라인 실행 ---
-    log_info "--- Starting Cycle: Running Pipeline 2 (MAG Analysis) ---"
+            log_error "Restarting QC Phase in 60 seconds..."
+            rm -f "$P1_STATE_FILE"
+            sleep 60
+            continue
+        else
+            # 파일이 아예 없는 대기 상태는 카운트하지 않음
+            log_info "No input files found yet. Waiting..."
+            sleep 60
+            continue
+        fi
+    else
+        # [성공] 결과물이 잘 있으면 카운터 리셋!
+        VERIFY_RETRY_COUNT=0
+    fi
+    
+    log_info "Inputs for Pipeline 2 verified. Proceeding to MAG..."
+
+    # -------------------------------------------------------
+    # [2단계] MAG 분석 실행
+    # -------------------------------------------------------
+    log_info "--- [Phase 2] Running MAG Pipeline ---"
+
     P2_CMD_ARRAY=(
         bash "${PROJECT_ROOT_DIR}/scripts/mag.sh"
         all --input_dir "${P1_CLEAN_READS_DIR}" --output_dir "${P2_OUTPUT_DIR}"
@@ -189,46 +264,51 @@ while true; do
     if [[ -n "$BAKTA_OPTS" ]]; then P2_CMD_ARRAY+=(--bakta-opts "$BAKTA_OPTS"); fi
 
     if ! "${P2_CMD_ARRAY[@]}"; then
-        log_error "Pipeline 2 failed. Aborting."
-        exit 1
-    fi
-    log_info "--- Cycle Step: Pipeline 2 finished. ---"
-    printf "\n"
-
-    # --- 3단계: 최종 안정성 검사 ---
-    log_info "Performing final stability check on input directory..."
-    # 현재 이 순간의 입력 폴더 상태를 임시 파일로 다시 계산
-    CURRENT_STATE_FILE=$(mktemp)
-    if [[ -n "$(find "$INPUT_DIR" -maxdepth 1 -type f -name "*.fastq.gz" 2>/dev/null)" ]]; then
-        find "$INPUT_DIR" -maxdepth 1 -type f -name "*.fastq.gz" -print0 | xargs -0 md5sum | sort -k 2 > "$CURRENT_STATE_FILE"
-    else
-        touch "$CURRENT_STATE_FILE" # 입력 폴더가 비어있을 경우, 빈 파일로 비교
+        log_error "Pipeline 2 failed. Retrying in next cycle..."
     fi
 
-    # P1_STATE_FILE 경로를 올바르게 사용합니다.
-    if [ -f "$P1_STATE_FILE" ] && diff -q "$P1_STATE_FILE" "$CURRENT_STATE_FILE" >/dev/null; then
-        log_info "Input directory is stable. All samples have been processed."
-        rm -f "$CURRENT_STATE_FILE" # 임시 파일 삭제
-        break # 상태가 안정되었으므로 while 루프를 종료합니다.
+    # =======================================================
+    # [수정] 리포트 생성을 루프 안으로 이동 (매 사이클마다 갱신)
+    # =======================================================
+    log_info "--- Cycle Finished. Updating Summary Report... ---"
+
+    if [ -f "${PROJECT_ROOT_DIR}/lib/reporting_functions.sh" ]; then
+        source "${PROJECT_ROOT_DIR}/lib/reporting_functions.sh"
+        if command -v create_summary_report &> /dev/null; then
+            # 매번 최신 상태를 반영하여 리포트 덮어쓰기
+            create_summary_report "$OUTPUT_DIR"
+            log_info "Summary report updated."
+        else
+            log_error "'create_summary_report' function not found. Skipping."
+        fi
     else
-        log_info "Input directory has changed or is not yet stable. Starting another cycle..."
-        rm -f "$CURRENT_STATE_FILE" # 임시 파일 삭제
-        sleep 15 # 다음 사이클 전에 15초 대기
+        log_warn "Reporting library not found. Skipping report generation."
     fi
+
+    log_info "Waiting for next cycle..."
+
+    # =======================================================
+    # [Pro 3.0] 종료 신호 감지 (Graceful Shutdown)
+    # =======================================================
+    # 입력 폴더에 'stop_pipeline'이라는 파일이 있으면 종료합니다.
+    if [ -f "${INPUT_DIR}/stop_pipeline" ]; then
+        log_info "🛑 Stop signal detected ('stop_pipeline' file found)."
+        log_info "Finishing current cycle and shutting down gracefully."
+        rm -f "${INPUT_DIR}/stop_pipeline" # 신호 파일 삭제 (청소)
+        break # 무한 루프 탈출! -> 프로그램 종료
+    fi
+
+    #log_info "Waiting for next cycle..."
+
+    # -------------------------------------------------------
+    # [5단계] CPU 과부하 방지를 위한 휴식 (Sleep)
+    # -------------------------------------------------------
+    # [설정] 대기 시간 (3600초 = 1시) - 필요에 따라 조절하세요
+    LOOP_SLEEP_SEC=3600 
+    
+    log_info "Cycle complete. Sleeping for ${LOOP_SLEEP_SEC} seconds before next check..."
+    log_info "(To stop safely, create a file named 'stop_pipeline' in the input dir)"
+    
+    sleep "$LOOP_SLEEP_SEC"
+
 done
-
-# --- 4. 최종 리포트 생성 ---
-log_info "--- All pipelines finished and input is stable. Generating final summary report. ---"
-if [ -f "${PROJECT_ROOT_DIR}/lib/reporting_functions.sh" ]; then
-    source "${PROJECT_ROOT_DIR}/lib/reporting_functions.sh"
-    # create_summary_report 함수가 라이브러리 파일 안에 정의되어 있다고 가정합니다.
-    if command -v create_summary_report &> /dev/null; then
-        create_summary_report "$OUTPUT_DIR"
-    else
-        log_error "'create_summary_report' function not found in library file. Skipping."
-    fi
-else
-    log_info "Reporting functions library not found, skipping final report generation."
-fi
-
-log_info "---  Metagenome Pipeline Run Completely Finished!  ---"

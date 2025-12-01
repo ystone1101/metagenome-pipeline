@@ -103,7 +103,8 @@ MEGAHIT_PRESET_TO_USE=""
 GTDBTK_DB_DIR_ARG=""
 BAKTA_DB_DIR_ARG=""
 KRAKEN2_DB_ARG=""
-TMP_DIR_ARG=$(mktemp -d) 
+#TMP_DIR_ARG=$(mktemp -d)
+TMP_DIR_ARG="" 
 MEGAHIT_PRESET_TO_USE=""
 MEGAHIT_EXTRA_OPTS=""
 METAWRAP_BINNING_EXTRA_OPTS=""
@@ -248,6 +249,17 @@ else
     export MAG_BASE_DIR="$OUTPUT_DIR_ARG"
 fi
 
+# [수정 3] TMP 디렉토리 안전 생성 (용량이 넉넉한 결과 폴더 내부에 생성)
+if [[ -z "$TMP_DIR_ARG" ]]; then
+    SAFE_TMP_DIR="${MAG_BASE_DIR}/tmp_workspace"
+    mkdir -p "$SAFE_TMP_DIR"
+    TMP_DIR_ARG=$(mktemp -d -p "$SAFE_TMP_DIR")
+    echo "INFO: Temporary workspace created at: $TMP_DIR_ARG"
+else
+    # 사용자가 직접 지정한 경우
+    mkdir -p "$TMP_DIR_ARG"
+fi
+
 # 모든 검사를 통과한 경우, 변수 설정
 if [[ -n "$GTDBTK_DB_DIR_ARG" ]]; then
     export GTDBTK_DATA_PATH="$GTDBTK_DB_DIR_ARG"
@@ -303,23 +315,23 @@ fi
 log_info "All dependencies are satisfied."
 
 # 체크섬 기반의 입력 파일 변경 감지 로직
-STATE_FILE="${MAG_BASE_DIR}/.pipeline.state"
-STATE_FILE_NEW="${STATE_FILE}.new"
-log_info "Checking for input file changes using checksums..."
-find "$QC_READS_DIR" -maxdepth 1 -type f -name "*.fastq.gz" -print0 2>/dev/null | xargs -0 md5sum | sort -k 2 > "$STATE_FILE_NEW"
-
-if [ -f "$STATE_FILE" ] && diff -q "$STATE_FILE" "$STATE_FILE_NEW" >/dev/null; then
-    log_info "No changes detected in input files. MAG pipeline is up-to-date."
-    rm -f "$STATE_FILE_NEW"
-    exit 0 # 변경사항이 없으면 여기서 성공적으로 종료
-fi
-log_info "Input file changes detected. Proceeding with MAG analysis..."
+# STATE_FILE="${MAG_BASE_DIR}/.pipeline.state"
+# STATE_FILE_NEW="${STATE_FILE}.new"
+# log_info "Checking for input file changes using checksums..."
+# find "$QC_READS_DIR" -maxdepth 1 -type f -name "*.fastq.gz" -print0 2>/dev/null | xargs -0 md5sum | sort -k 2 > "$STATE_FILE_NEW"
+#
+# if [ -f "$STATE_FILE" ] && diff -q "$STATE_FILE" "$STATE_FILE_NEW" >/dev/null; then
+#    log_info "No changes detected in input files. MAG pipeline is up-to-date."
+#    rm -f "$STATE_FILE_NEW"
+#    exit 0 # 변경사항이 없으면 여기서 성공적으로 종료
+# fi
+# log_info "Input file changes detected. Proceeding with MAG analysis..."
 
 # --- 9. 메인 루프 시작 ---
 log_info "--- (Step 2) Starting Per-Sample MAG Analysis (Mode: ${RUN_MODE}) ---"
 if [ -z "$(ls -A "${QC_READS_DIR}"/*_1.fastq.gz 2>/dev/null)" ]; then
     log_warn "입력 폴더 '${QC_READS_DIR}'에 FASTQ 파일이 없습니다. 파이프라인 2를 종료합니다."
-    rm -f "$STATE_FILE_NEW"
+#    rm -f "$STATE_FILE_NEW"
     exit 0
 fi
 
@@ -389,7 +401,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
             run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS"
             
             BAKTA_MAGS_OUT_DIR_SAMPLE="${BAKTA_ON_MAGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_MAGS_OUT_DIR_SAMPLE"
-            run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS"
+            run_bakta_for_mags "$SAMPLE" "$FINAL_BINS_DIR" "$BAKTA_MAGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
         fi
 
     else
@@ -485,6 +497,6 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
 done
 
 # --- 모든 작업이 성공적으로 끝나면, 새로운 상태를 공식 상태로 저장합니다. ---
-mv "$STATE_FILE_NEW" "$STATE_FILE"
+# mv "$STATE_FILE_NEW" "$STATE_FILE"
 log_info "Successfully updated MAG pipeline state."
 log_info "--- (Step 2) All samples processed successfully! ---"

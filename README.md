@@ -23,6 +23,7 @@
 - [Prerequisites](#prerequisites)
 - [Installation & Setup](#installation--setup)
 - [Usage](#usage)
+- [Stopping the Pipeline](#stopping-the-pipeline)
 - [Output Structure](#output-structure)
 - [Future Work](#future-work)
 - [License](#license)
@@ -31,37 +32,56 @@
 
 ## Overview
 
-Metagenome analysis can be challenging to reproduce due to the numerous tools and complex data processing steps involved. The Dokkaebi pipeline was designed to solve these problems. Through three modes—`qc` (preprocessing and taxonomic profiling), `mag` (MAG recovery and analysis), and `all` (the entire workflow)—users can select their desired depth of analysis. With sophisticated error handling and checkpointing features, it flexibly manages interruptions that may occur during large-scale data processing.
+Metagenome analysis is inherently challenging due to the complexity of data processing, the vast number of tools involved, and the need to handle massive datasets over long runtimes. **Dokkaebi** is designed to solve these problems by providing a powerful, automated, and reproducible workflow.
+
+To maximize efficiency and stability, Dokkaebi implements a **"Continuous Monitoring"** system that automatically detects and processes new files, along with a **"Hybrid Parallel Strategy"** that runs I/O-bound tasks in parallel while managing memory-heavy tasks sequentially.
+
+Users can select their desired depth of analysis through three flexible modes—`qc` (preprocessing and taxonomic profiling), `mag` (MAG recovery and analysis), and `all` (the entire workflow). With sophisticated error handling and checkpointing features, the pipeline ensures reliable performance and allows for safe resumption of analysis during large-scale data processing.
 
 ***
 
 ## Key Features
 
-- **✨ All-in-One Workflow**: Flexibly execute the pipeline from raw reads to final annotated MAGs using the `qc`, `mag`, and `all` commands.
-- **🛡️ Robust & Resumable**: All scripts stop immediately upon error (`set -euo pipefail`) and provide detailed error logs. Additionally, sophisticated checkpointing using per-step success flags (`.success`) and input file checksums (`.state`) allows for safe resumption of analysis from the point of interruption.
-- **⚙️ Modular & Maintainable**: The structure, with a clear separation of functionalities (`scripts`), libraries (`lib`), and configurations (`config`), maximizes code readability and maintainability.
-- **🧪 Built-in Test Mode**: The `dokkaebi mag --test` option allows for automatic verification of the pipeline's proper functioning and dependencies, ensuring the environment is correctly set up before running on real data.
-- **🎨 User-Friendly Interface**: Each pipeline visually communicates its progress with colorful logs and ASCII art, and provides detailed help messages (`--help`) to enhance usability.
-- **🌿 Isolated Conda Environments**: The tools required for each analysis step are run in independent Conda environments, fundamentally resolving dependency conflicts.
-
+- **🔄 Continuous Monitoring & Auto-Scaling**: The pipeline runs in an infinite loop, instantly detecting new FASTQ files using ultra-fast `stat` checks (0.1s latency). It automatically prioritizes QC for new samples before starting the time-consuming MAG analysis.
+- **⚡ Hybrid Parallel Processing**:
+    - **QC Step**: Runs `pigz` decompression and `KneadData` in **parallel (default: 4 jobs)** to saturate CPU usage.
+    - **Taxonomy Step**: Automatically switches to **serial execution** for memory-intensive tools like `Kraken2` using a lock system to prevent OOM errors.
+    - **Annotation Step**: Runs `Bakta` on multiple MAGs simultaneously to speed up the final stage.
+- **🛡️ Smart Error Handling & Resume**:
+    - **Retry Logic**: Transient errors don't stop the pipeline. It retries up to 2 times before logging a critical error and moving on.
+    - **Graceful Shutdown**: Stops safely only after completing the current batch of jobs when a signal file is detected.
+- **✨ All-in-One Workflow**: Flexibly execute the pipeline using `qc`, `mag`, and `all` commands.
+- **🧪 Built-in Test Mode**: Verify all dependencies with `dokkaebi mag --test`.
 ***
 
 ## Pipeline Workflow
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/c95f7492-27da-4deb-99c6-91b302fd10c4" width="520" height="1068"/>
-</p>
+1.  **Monitoring**: Watches the input directory for changes.
+2.  **QC Phase (Parallel)**:
+    * Decompression (`pigz`)
+    * QC & Host Removal (`KneadData` or `fastp`) -> **Runs 4 samples at once.**
+    * Taxonomic Profiling (`Kraken2` / `Bracken`) -> **Runs 1 sample at a time (Safe Mode).**
+3.  **Stability Check**: Re-scans the input directory. If new files arrive, it repeats QC immediately.
+4.  **MAG Phase (Batch)**:
+    * Assembly (`MEGAHIT`)
+    * Binning & Refinement (`MetaWRAP`)
+    * Taxonomy (`GTDB-Tk`)
+    * Annotation (`Bakta`) -> **Runs 6 MAGs at once.**
+5.  **Reporting**: Updates the HTML summary report.
+6.  **Sleep & Repeat**: Sleeps for 10 minutes (configurable) to save CPU, then checks for new files again.
 
------
+***
+
 
 ## Prerequisites
 
-1.  **Conda**: Anaconda or Miniconda must be installed.
-2.  **Databases**: All necessary databases for the analysis must be downloaded and built beforehand.
-      - **Host reference database**: A host genome for `KneadData` (e.g., human hg38), which needs to be indexed with `bowtie2`.
-      - **Kraken2 database**: A classification database for `Kraken2` and `Bracken`.
-      - **GTDB-Tk database**: The database for `GTDB-Tk`.
-      - **Bakta database**: The database for `Bakta` (required).
+1.  **Conda**: Anaconda or Miniconda.
+2.  **System Tools**: `pigz` (required for parallel decompression).
+3.  **Databases**:
+      - **Host reference database**: Indexed with `bowtie2` (for KneadData).
+      - **Kraken2 database**: Standard or custom DB.
+      - **GTDB-Tk database**: Release 214 or later.
+      - **Bakta database**: Full or light version.
 
 -----
 
@@ -70,7 +90,7 @@ Metagenome analysis can be challenging to reproduce due to the numerous tools an
 #### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/ystone1101/metagenome-pipeline.git
+git clone [https://github.com/ystone1101/metagenome-pipeline.git](https://github.com/ystone1101/metagenome-pipeline.git)
 cd metagenome-pipeline
 ```
 
@@ -112,6 +132,7 @@ chmod +x scripts/*.sh
 ## Usage
 
 The Dokkaebi pipeline provides an intuitive command-line interface. All configurations are passed via command-line options.
+The pipeline is designed to run in the background (e.g., using tmux or nohup).
 
 #### General Syntax
 
@@ -150,14 +171,14 @@ The Dokkaebi pipeline provides an intuitive command-line interface. All configur
 
 ```bash
 ./dokkaebi all host \
-    --input_dir /path/to/raw_reads \
-    --output_dir /path/to/project_output \
-    --host_db /path/to/host_db \
-    --kraken2_db /path/to/kraken2_db \
-    --gtdbtk_db /path/to/gtdbtk_db \
-    --bakta_db /path/to/bakta_db \
-    --threads 16 \
-    --memory_gb 100
+    --input_dir /data/project/raw_reads \
+    --output_dir /data/project/results \
+    --host_db /data/DB/host/hg38 \
+    --kraken2_db /data/DB/kraken2 \
+    --gtdbtk_db /data/DB/gtdbtk \
+    --bakta_db /data/DB/bakta \
+    --threads 48 \
+    --memory_gb 120
 ```
 
 #### Example 4: Running the Automated Test
@@ -170,8 +191,23 @@ To verify that all dependencies, environments, and databases are correctly confi
     --bakta_db_dir /path/to/bakta_db \
     --kraken2_db /path/to/kraken2_db
 ```
-    
+
+#### Example 4: Stopping the Pipeline
+Since the pipeline runs in an infinite loop, you must use a Graceful Shutdown signal to stop it safely without corrupting data.
+
+**Do not press ```Ctrl+C``` if analysis is running!** Instead:
+1.  Open a new terminal.
+2.  Create a file named ```stop_pipeline``` in your **input directory**.
+
+```bash
+#Example
+touch /data/project/raw_reads/stop_pipeline
+```
+
+3.  The pipeline will detect this file after the current cycle finishes, perform cleanup, and exit cleanly.
+
 -----
+
 
 ## Output Structure
 
