@@ -199,6 +199,7 @@ run_bakta_for_mags() {
     log_info "Finished annotating all MAGs for ${sample_name}."
     echo "done" >> "$checkpoint_file"
 }
+
 #run_bakta_for_mags() {
 #    local sample_name=$1; local bins_dir=$2; local out_dir=$3; local bakta_db_path=$4; local tmp_dir=$5; local extra_opts="${6}"
 #    log_info "${sample_name}: Running Bakta annotation on final MAGs..."#
@@ -256,12 +257,12 @@ run_bakta_for_mags() {
 #            log_warn "Bakta annotation failed for ${base_name}."
 #        fi
 #    done
-    
-    # --- ✨ 3. 모든 작업 완료 후 'done' 표식 기록 ---
-    # for 루프가 성공적으로 모두 끝나면, checkpoint 파일 마지막에 'done'을 추가합니다.
-    log_info "Finished annotating all MAGs for ${sample_name}. Marking as complete."
-    echo "done" >> "$checkpoint_file"
-}
+#    
+#    # --- ✨ 3. 모든 작업 완료 후 'done' 표식 기록 ---
+#    # for 루프가 성공적으로 모두 끝나면, checkpoint 파일 마지막에 'done'을 추가합니다.
+#    log_info "Finished annotating all MAGs for ${sample_name}. Marking as complete."
+#    echo "done" >> "$checkpoint_file"
+# }
 
 #--- MetaWRAP Pipeline Function for a single sample ---
 run_metawrap_sample() {
