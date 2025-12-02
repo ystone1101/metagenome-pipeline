@@ -273,7 +273,14 @@ source "${PROJECT_ROOT_DIR}/lib/mag_functions.sh"
 
 # --- 5. 디렉토리 및 로그 파일 설정 ---
 mkdir -p "$MAG_BASE_DIR"
+mkdir -p "$REPAIR_DIR"
+mkdir -p "$ASSEMBLY_DIR"
 mkdir -p "$ASSEMBLY_STATS_DIR"
+mkdir -p "$KRAKEN_ON_CONTIGS_DIR"
+mkdir -p "$BAKTA_ON_CONTIGS_DIR"
+mkdir -p "$METAWRAP_DIR"
+mkdir -p "$GTDBTK_ON_MAGS_DIR"
+mkdir -p "$BAKTA_ON_MAGS_DIR"
 mkdir -p "$TMP_DIR_ARG"
 LOG_FILE="${MAG_BASE_DIR}/3_mag_per_sample_$(date +%Y%m%d_%H%M%S).log"
 > "$LOG_FILE"; trap '_error_handler' ERR
