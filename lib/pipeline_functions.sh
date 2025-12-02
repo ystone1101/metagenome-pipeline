@@ -291,3 +291,30 @@ get_r2_path() {
         return 1
     fi
 }
+
+# --- Check for New Input Files (Used by MAG to break early) ---
+# 설명: mag.sh 내부에서 run_all.sh의 상태 파일을 읽어 변경 감지
+check_for_new_input_files() {
+    local raw_dir=$1
+    local state_file=$2
+    
+    local CURRENT_STATE_FILE=$(mktemp)
+    
+    # [stat 감지] 현재 입력 폴더의 상태를 빠르게 기록
+    if [[ -n "$(find "$raw_dir" -maxdepth 1 -type f -name "*.fastq.gz" 2>/dev/null)" ]]; then
+        find "$raw_dir" -maxdepth 1 -type f -name "*.fastq.gz" -printf "%f\t%s\t%T@\n" | sort > "$CURRENT_STATE_FILE"
+    else
+        touch "$CURRENT_STATE_FILE"
+    fi
+
+    # [비교] 이전 상태와 현재 상태 비교
+    if [ -f "$state_file" ] && diff -q "$state_file" "$CURRENT_STATE_FILE" >/dev/null; then
+        # 변화 없음
+        rm -f "$CURRENT_STATE_FILE"
+        return 0
+    else
+        # 변화 있음 (새 파일 도착!)
+        rm -f "$CURRENT_STATE_FILE"
+        return 99 # MAG 루프를 중단하고 QC로 돌아가라는 신호
+    fi
+}

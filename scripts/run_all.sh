@@ -296,24 +296,52 @@ while true; do
     # [2단계] MAG 분석 실행
     # -------------------------------------------------------
     log_info "--- [Phase 2] Running MAG Pipeline ---"
+    MAG_RETRY_COUNT=0
 
-    P2_CMD_ARRAY=(
-        bash "${PROJECT_ROOT_DIR}/scripts/mag.sh"
-        all --input_dir "${P1_CLEAN_READS_DIR}" --output_dir "${P2_OUTPUT_DIR}"
-        --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}"
-        --threads "${THREADS}" --memory_gb "${MEMORY_GB}"
-    )
+    while [ "$MAG_RETRY_COUNT" -le "$MAX_RETRIES" ]; do
+        log_info "--- [Phase 2] Running MAG Pipeline (Attempt: $((MAG_RETRY_COUNT+1))) ---"
 
-    if [[ -n "$MEGAHIT_OPTS" ]]; then P2_CMD_ARRAY+=(--megahit-opts "$MEGAHIT_OPTS"); fi
-    if [[ -n "$METAWRAP_BINNING_OPTS" ]]; then P2_CMD_ARRAY+=(--metawrap-binning-opts "$METAWRAP_BINNING_OPTS"); fi
-    if [[ -n "$METAWRAP_REFINEMENT_OPTS" ]]; then P2_CMD_ARRAY+=(--metawrap-refinement-opts "$METAWRAP_REFINEMENT_OPTS"); fi
-    if [[ -n "$KRAKEN2_OPTS" ]]; then P2_CMD_ARRAY+=(--kraken2-opts "$KRAKEN2_OPTS"); fi
-    if [[ -n "$GTDBTK_OPTS" ]]; then P2_CMD_ARRAY+=(--gtdbtk-opts "$GTDBTK_OPTS"); fi
-    if [[ -n "$BAKTA_OPTS" ]]; then P2_CMD_ARRAY+=(--bakta-opts "$BAKTA_OPTS"); fi
+        P2_CMD_ARRAY=(
+            bash "${PROJECT_ROOT_DIR}/scripts/mag.sh"
+            all --input_dir "${P1_CLEAN_READS_DIR}" --output_dir "${P2_OUTPUT_DIR}"
+            --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}"
+            --threads "${THREADS}" --memory_gb "${MEMORY_GB}"
+        )
 
-    if ! "${P2_CMD_ARRAY[@]}"; then
-        log_error "Pipeline 2 failed. Retrying in next cycle..."
-    fi
+        if [[ -n "$MEGAHIT_OPTS" ]]; then P2_CMD_ARRAY+=(--megahit-opts "$MEGAHIT_OPTS"); fi
+        if [[ -n "$METAWRAP_BINNING_OPTS" ]]; then P2_CMD_ARRAY+=(--metawrap-binning-opts "$METAWRAP_BINNING_OPTS"); fi
+        if [[ -n "$METAWRAP_REFINEMENT_OPTS" ]]; then P2_CMD_ARRAY+=(--metawrap-refinement-opts "$METAWRAP_REFINEMENT_OPTS"); fi
+        if [[ -n "$KRAKEN2_OPTS" ]]; then P2_CMD_ARRAY+=(--kraken2-opts "$KRAKEN2_OPTS"); fi
+        if [[ -n "$GTDBTK_OPTS" ]]; then P2_CMD_ARRAY+=(--gtdbtk-opts "$GTDBTK_OPTS"); fi
+        if [[ -n "$BAKTA_OPTS" ]]; then P2_CMD_ARRAY+=(--bakta-opts "$BAKTA_OPTS"); fi
+
+        # 1. MAG 실행
+        if "${P2_CMD_ARRAY[@]}"; then
+            MAG_RETRY_COUNT=0 # 성공하면 카운터 리셋
+            break # MAG 루프 탈출 (다음 단계로 이동)
+        else
+            # 2. 실패 또는 인터럽트 신호 처리
+            MAG_RETURN_CODE=$? # 종료 코드 캡처
+            
+            if [ "$MAG_RETURN_CODE" -eq 99 ]; then
+                log_warn "MAG run interrupted by new input. Restarting QC phase."
+                MAG_RETRY_COUNT=0 # 카운트 리셋
+                break # MAG 루프 탈출 (다음 단계로 이동)
+            fi
+
+            # 3. 영구 실패 처리 (기존 로직 유지)
+            ((MAG_RETRY_COUNT++))
+            log_error "Pipeline 2 failed (Failure Count: $MAG_RETRY_COUNT / $MAX_RETRIES)."
+            
+            if [ "$MAG_RETRY_COUNT" -gt "$MAX_RETRIES" ]; then
+                log_error "CRITICAL: MAG failed $MAX_RETRIES times consecutively. Aborting."
+                exit 1 
+            fi
+            
+            log_info "Retrying MAG in 60s..."
+            sleep 60
+        fi
+    done
 
     # =======================================================
     # [수정] 리포트 생성을 루프 안으로 이동 (매 사이클마다 갱신)

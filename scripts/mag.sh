@@ -512,6 +512,20 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         fi
     fi
     log_info "--- Finished processing for sample '$SAMPLE' ---"
+
+    # run_all.sh의 상태 파일 경로를 여기서는 알 수 없으므로,
+    # 임시로 MAG_BASE_DIR/../.pipeline.state를 사용한다고 가정합니다.
+    # (실제 Master Script에서 P1_STATE_FILE 경로를 전달해야 합니다.)
+    MASTER_STATE_FILE="${MAG_BASE_DIR}/../1_microbiome_taxonomy/.pipeline.state"
+    
+    if check_for_new_input_files "$INPUT_DIR_ARG" "$MASTER_STATE_FILE"; then
+        : # 변화 없음 (계속 다음 MAG 분석)
+    else
+        # 99 코드가 반환됨 -> 즉시 루프 중단 후 마스터 스크립트로 신호 전달
+        log_info "New input detected during MAG run. SIGNALLING MASTER to re-run QC."
+        exit 99 
+    fi
+    
 done
 
 # --- 모든 작업이 성공적으로 끝나면, 새로운 상태를 공식 상태로 저장합니다. ---
