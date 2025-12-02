@@ -410,7 +410,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         # 1. Read Pair Repair 단계
         R1_REPAIRED_GZ="${REPAIR_DIR_SAMPLE}/${SAMPLE}_R1.repaired.fastq.gz"
         # .success 플래그와 실제 결과 파일(.fastq.gz) 존재 여부를 함께 확인
-        if [ -f "$REPAIR_SUCCESS_FLAG" ] && [ -s "$R1_REPAIRED_GZ" ]; then
+        if [ -f "$REPAIR_SUCCESS_FLAG" ]; then
             log_info "Read pair repair for ${SAMPLE} already complete. Skipping."
         else
             mkdir -p "$REPAIR_DIR_SAMPLE"
@@ -423,17 +423,23 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "megahit" ]]; then
             # 2. Assembly 단계
             # .success 플래그와 실제 결과 파일(final.contigs.fa) 존재 및 크기(-s)를 함께 확인
-            if [ -f "$ASSEMBLY_SUCCESS_FLAG" ] && [ -s "$ASSEMBLY_FA" ]; then
+            # if [ -f "$ASSEMBLY_SUCCESS_FLAG" ] && [ -s "$ASSEMBLY_FA" ]; then
+            #    log_info "Assembly for ${SAMPLE} already exists. Skipping."
+            if [ -f "$ASSEMBLY_SUCCESS_FLAG" ]; then
                 log_info "Assembly for ${SAMPLE} already exists. Skipping."
             else
                 run_megahit "$SAMPLE" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "$ASSEMBLY_OUT_DIR_SAMPLE" "$MEGAHIT_PRESET_TO_USE" "$MEMORY_GB" "$MIN_CONTIG_LEN" "$THREADS" "$MEGAHIT_EXTRA_OPTS"
-                if [ -s "$ASSEMBLY_FA" ]; then touch "$ASSEMBLY_SUCCESS_FLAG"; else log_warn "Assembly for ${SAMPLE} failed."; continue; fi
+                if [ $? -eq 0 ]; then touch "$ASSEMBLY_SUCCESS_FLAG"; else log_warn "Assembly for ${SAMPLE} failed."; continue; fi
             fi
             
             # Assembly 성공 여부와 관계없이 후속 분석 실행 (내부에서 파일 존재 여부 확인)
-            if [ -f "$POST_ASSEMBLY_SUCCESS_FLAG" ]; then log_info "Post-assembly analysis for ${SAMPLE} already exists. Skipping."; else
+            if [ -f "$POST_ASSEMBLY_SUCCESS_FLAG" ]; then 
+                log_info "Post-assembly analysis for ${SAMPLE} already exists. Skipping." 
+            else
+
                 if [ -f "$ASSEMBLY_SUCCESS_FLAG" ]; then
                     log_info "Starting post-assembly analysis for ${SAMPLE}..."
+                
                     STATS_OUT_FILE="${ASSEMBLY_STATS_DIR}/${SAMPLE}_assembly_stats.txt"
                     conda run -n "$BBMAP_ENV" stats.sh in="$ASSEMBLY_FA" > "$STATS_OUT_FILE"
                     
@@ -455,12 +461,17 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         fi
         
         if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "metawrap" ]]; then
-            if [ ! -f "$ASSEMBLY_SUCCESS_FLAG" ]; then log_warn "Assembly must be completed first. Skipping binning."; else
+            if [ ! -f "$ASSEMBLY_SUCCESS_FLAG" ]; then 
+                log_warn "Assembly must be completed first. Skipping binning.";
+            else
                 # 4. Binning 단계
                 # .success 플래그와 실제 결과 폴더(FINAL_BINS_DIR) 존재 및 내용물(-n)을 함께 확인
-                if [ -f "$BINNING_SUCCESS_FLAG" ] && [ -d "$FINAL_BINS_DIR" ] && [ -n "$(ls -A "$FINAL_BINS_DIR" 2>/dev/null)" ]; then
+                #if [ -f "$BINNING_SUCCESS_FLAG" ] && [ -d "$FINAL_BINS_DIR" ] && [ -n "$(ls -A "$FINAL_BINS_DIR" 2>/dev/null)" ]; then
+                #    log_info "Binning for ${SAMPLE} already exists. Skipping."
+                #else
+                if [ -f "$BINNING_SUCCESS_FLAG" ]; then
                     log_info "Binning for ${SAMPLE} already exists. Skipping."
-                else
+                else 
                     run_metawrap_sample "$SAMPLE" "$ASSEMBLY_FA" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "${METAWRAP_DIR}/${SAMPLE}" "$MIN_COMPLETENESS" "$MAX_CONTAMINATION" "$METAWRAP_BINNING_EXTRA_OPTS" "$METAWRAP_REFINEMENT_EXTRA_OPTS"
                     if [[ -d "$FINAL_BINS_DIR" && -n "$(ls -A "$FINAL_BINS_DIR" 2>/dev/null)" ]]; then touch "$BINNING_SUCCESS_FLAG"; else log_warn "Binning for ${SAMPLE} failed."; continue; fi
                 fi

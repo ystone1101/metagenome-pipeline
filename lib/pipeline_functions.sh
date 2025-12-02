@@ -261,3 +261,33 @@ merge_bracken_outputs() {
     done
     log_info "Bracken 결과 통합 완료. 결과물 저장 경로: ${bracken_out_dir}"
 }
+
+# ==========================================================
+# --- Get R2 Pair Path Function (Shared Logic) ---
+# 설명: R1 파일 경로를 입력받아 해당하는 R2 파일 경로를 추정하여 반환합니다.
+# ==========================================================
+get_r2_path() {
+    local r1_path=$1
+    local r1_base=$(basename "$r1_path")
+    local r1_dir=$(dirname "$r1_path")
+    
+    # BASH 정규식 매칭을 사용하여 안전하게 R2 파일명 구성
+    # 패턴: (Prefix)(Tag: _R1, _1, .R1, .1)(Suffix)
+    if [[ "$r1_base" =~ ^(.*)(_R?1|_1|\.R1|\.1)(.*)\.fastq\.gz$ ]]; then
+        local prefix="${BASH_REMATCH[1]}"
+        local clean_tag="${BASH_REMATCH[2]}"
+        local suffix="${BASH_REMATCH[3]}"
+        
+        # tag 치환: 1 -> 2, R1 -> R2
+        CLEAN_TAG="${clean_tag/R1/R2}"
+        CLEAN_TAG="${CLEAN_TAG/r1/r2}"
+        CLEAN_TAG="${CLEAN_TAG/_1/_2}"
+        CLEAN_TAG="${CLEAN_TAG/.1/.2}"
+
+        echo "${r1_dir}/${prefix}${CLEAN_TAG}${suffix}.fastq.gz"
+        return 0
+    else
+        # 패턴 불일치 시 오류 코드 반환
+        return 1
+    fi
+}

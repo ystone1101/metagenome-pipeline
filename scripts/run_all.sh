@@ -256,7 +256,7 @@ while true; do
     MISSING_PAIR_FOUND=0
     for R1_CLEAN in "${P1_CLEAN_READS_DIR}"/*_1.fastq.gz; do
 
-        local BASE_NAME=$(basename "$R1_CLEAN")
+        # local BASE_NAME=$(basename "$R1_CLEAN")
         # R1 파일명 패턴을 R2 파일명 패턴으로 변환 (mag.sh의 로직과 동일해야 함)
         # R2_CLEAN=$(echo "$R1_CLEAN" | sed -E 's/([._][Rr]?)1(\.fastq\.gz)$/\12\2/')
         
@@ -266,26 +266,20 @@ while true; do
         #    break
         #fi
 
-        if [[ "$BASE_NAME" =~ ^(.*)(_R?1|_1|\.R1|\.1)(.*)\.fastq\.gz$ ]]; then
-            # BASH_REMATCH 배열을 사용하여 안전하게 R2 파일명 구성
-            local CLEAN_TAG="${BASH_REMATCH[2]}"
+        R2_CLEAN=$(get_r2_path "$R1_CLEAN") 
+        local status=$?
 
-            CLEAN_TAG="${CLEAN_TAG/R1/R2}"
-            CLEAN_TAG="${CLEAN_TAG/r1/r2}"
-            CLEAN_TAG="${CLEAN_TAG/_1/_2}"
-            CLEAN_TAG="${CLEAN_TAG/.1/.2}"
+        # 1. 파일명 패턴 오류 검사 (함수가 0이 아닌 코드 반환 시)
+        if [ "$status" -ne 0 ]; then
+            log_error "FATAL ERROR: Unknown R1 filename format for $(basename "$R1_CLEAN")!"
+            MISSING_PAIR_FOUND=1
+            break
+        fi
 
-            R2_CLEAN="${P1_CLEAN_READS_DIR}/${BASH_REMATCH[1]}${CLEAN_TAG}${BASH_REMATCH[3]}" # 안전한 R2 변환 (대/소문자 포함)
-        
-            # 3. 만약 R2 파일이 없으면 치명적 에러 발생
-            if [[ ! -f "$R2_CLEAN" ]]; then
-                log_error "FATAL ERROR: Missing paired R2 file for ${base_name}!"
-                log_error "   Expected R2 path: $R2_CLEAN"
-                MISSING_PAIR_FOUND=1
-                break
-            fi
-        else
-            log_error "FATAL ERROR: Unknown R1 filename format: ${base_name}"
+        # 2. R2 파일 존재 유무 확인 (무결성 검사)
+        if [[ ! -f "$R2_CLEAN" ]]; then
+            log_error "FATAL ERROR: Missing paired R2 file for $(basename "$R1_CLEAN")!"
+            log_error "   Expected R2 path: $R2_CLEAN"
             MISSING_PAIR_FOUND=1
             break
         fi
