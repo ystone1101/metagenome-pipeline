@@ -65,6 +65,9 @@ log_info() {
 log_error() {
     echo -e "\033[0;31m[MASTER-ERROR] $(date +'%Y-%m-%d %H:%M:%S') | $1\033[0m" >&2
 }
+log_warn() {
+    echo -e "\033[0;33m[MASTER-WARN] $(date +'%Y-%m-%d %H:%M:%S') | $1\033[0m" >&2
+}
 
 # --- 2. 기본값 설정 및 인자 파싱 ---
 if [[ $# -eq 0 || ("$1" == "-h" || "$1" == "--help") ]]; then print_usage; exit 0; fi
@@ -140,7 +143,9 @@ mkdir -p "$P1_OUTPUT_DIR" "$P2_OUTPUT_DIR"
 # [설정] 재시도 제한 횟수
 QC_RETRY_COUNT=0
 VERIFY_RETRY_COUNT=0  # [추가] 결과물 검증 실패 카운터
+MAG_RETRY_COUNT=0
 MAX_RETRIES=2
+LOOP_SLEEP_SEC=1800 # 30분 대기
 
 while true; do
     # -------------------------------------------------------
@@ -164,7 +169,6 @@ while true; do
 
         # 2. QC 실행 및 에러 핸들링
         if "${P1_CMD_ARRAY[@]}"; then
-            # [성공 시] 카운터 초기화
             QC_RETRY_COUNT=0
         else
             # [실패 시] 카운터 증가
@@ -212,6 +216,9 @@ while true; do
     # [1.5단계] 안전장치: Pipeline 2 입력(Clean Reads) 검증
     # -------------------------------------------------------
     log_info "Verifying inputs for Pipeline 2..."
+
+    RAW_FILE_COUNT=$(find "$INPUT_DIR" -maxdepth 1 -type f -name "*.fastq.gz" 2>/dev/null | wc -l)
+    CLEAN_FILE_COUNT=$(find "$P1_CLEAN_READS_DIR" -maxdepth 1 -type f -name "*_1.fastq.gz" 2>/dev/null | wc -l) # R1 파일만 카운트
     
     # Clean Reads 폴더가 비어있는데 원본 파일은 있는 경우
     if [[ ! -d "$P1_CLEAN_READS_DIR" || -z "$(ls -A "$P1_CLEAN_READS_DIR" 2>/dev/null)" ]]; then
@@ -240,6 +247,53 @@ while true; do
     else
         # [성공] 결과물이 잘 있으면 카운터 리셋!
         VERIFY_RETRY_COUNT=0
+    fi
+
+    # -------------------------------------------------------
+    # [1.7단계] Pair File 존재 유무 확인 (최종 무결성 검사)
+    # -------------------------------------------------------
+    log_info "Checking R1/R2 pairing integrity..."
+    MISSING_PAIR_FOUND=0
+    for R1_CLEAN in "${P1_CLEAN_READS_DIR}"/*_1.fastq.gz; do
+
+        local BASE_NAME=$(basename "$R1_CLEAN")
+        # R1 파일명 패턴을 R2 파일명 패턴으로 변환 (mag.sh의 로직과 동일해야 함)
+        # R2_CLEAN=$(echo "$R1_CLEAN" | sed -E 's/([._][Rr]?)1(\.fastq\.gz)$/\12\2/')
+        
+        # if [[ ! -f "$R2_CLEAN" ]]; then
+        #    log_error "FATAL ERROR: Missing paired R2 file for $(basename "$R1_CLEAN")!"
+        #    MISSING_PAIR_FOUND=1
+        #    break
+        #fi
+
+        if [[ "$BASE_NAME" =~ ^(.*)(_R?1|_1|\.R1|\.1)(.*)\.fastq\.gz$ ]]; then
+            # BASH_REMATCH 배열을 사용하여 안전하게 R2 파일명 구성
+            local CLEAN_TAG="${BASH_REMATCH[2]}"
+
+            CLEAN_TAG="${CLEAN_TAG/R1/R2}"
+            CLEAN_TAG="${CLEAN_TAG/r1/r2}"
+            CLEAN_TAG="${CLEAN_TAG/_1/_2}"
+            CLEAN_TAG="${CLEAN_TAG/.1/.2}"
+
+            R2_CLEAN="${P1_CLEAN_READS_DIR}/${BASH_REMATCH[1]}${CLEAN_TAG}${BASH_REMATCH[3]}" # 안전한 R2 변환 (대/소문자 포함)
+        
+            # 3. 만약 R2 파일이 없으면 치명적 에러 발생
+            if [[ ! -f "$R2_CLEAN" ]]; then
+                log_error "FATAL ERROR: Missing paired R2 file for ${base_name}!"
+                log_error "   Expected R2 path: $R2_CLEAN"
+                MISSING_PAIR_FOUND=1
+                break
+            fi
+        else
+            log_error "FATAL ERROR: Unknown R1 filename format: ${base_name}"
+            MISSING_PAIR_FOUND=1
+            break
+        fi
+    done
+
+    if [ "$MISSING_PAIR_FOUND" -eq 1 ]; then
+        log_error "ABORTING: Pipeline cannot proceed with broken paired-end data."
+        exit 1
     fi
     
     log_info "Inputs for Pipeline 2 verified. Proceeding to MAG..."
@@ -292,6 +346,9 @@ while true; do
     # =======================================================
     # 입력 폴더에 'stop_pipeline'이라는 파일이 있으면 종료합니다.
     if [ -f "${INPUT_DIR}/stop_pipeline" ]; then
+        rm -f "$P1_STATE_FILE"
+
+        printf "\n"
         log_info "🛑 Stop signal detected ('stop_pipeline' file found)."
         log_info "Finishing current cycle and shutting down gracefully."
         rm -f "${INPUT_DIR}/stop_pipeline" # 신호 파일 삭제 (청소)
@@ -303,8 +360,8 @@ while true; do
     # -------------------------------------------------------
     # [5단계] CPU 과부하 방지를 위한 휴식 (Sleep)
     # -------------------------------------------------------
-    # [설정] 대기 시간 (3600초 = 1시) - 필요에 따라 조절하세요
-    LOOP_SLEEP_SEC=3600 
+    # [설정] 대기 시간 (1800초 = 30분) - 필요에 따라 조절하세요
+    # LOOP_SLEEP_SEC=1800 
     
     log_info "Cycle complete. Sleeping for ${LOOP_SLEEP_SEC} seconds before next check..."
     log_info "(To stop safely, create a file named 'stop_pipeline' in the input dir)"

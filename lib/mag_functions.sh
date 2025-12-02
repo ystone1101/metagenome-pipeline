@@ -30,10 +30,10 @@ run_pair_repair() {
 #--- MEGAHIT Assembly Function (Checkpoint 기능 강화) ---
 run_megahit() {
     local sample_name=$1; local r1_qc=$2; local r2_qc=$3; local assembly_out_dir=$4; local preset_option=$5; local memory_gb=$6;
-    local min_contig_len=$7; local threads=$8; local extra_opts="${9}"
+    local min_contig_len=$7; local threads=$8; local extra_opts="${9:-}"
     
     # ✨✨ 해결책: 함수가 시작될 때 출력 폴더를 직접 생성합니다. ✨✨
-    mkdir -p "$assembly_out_dir"
+#    mkdir -p "$assembly_out_dir"
     
     local final_assembly_file="${assembly_out_dir}/final.contigs.fa"
     local checkpoint_file="${assembly_out_dir}/checkpoints.txt"
@@ -57,7 +57,7 @@ run_megahit() {
             rm -rf "$assembly_out_dir"
         fi
         
-        log_info "${sample_name}: Starting new MEGAHIT assembly with preset '${preset_option}'..."
+        log_info "${sample_name}: Starting MEGAHIT assembly with preset option ('${preset_option}')..."
         conda run -n "$MEGAHIT_ENV" megahit \
             -1 "$r1_qc" -2 "$r2_qc" \
             -o "$assembly_out_dir" \
@@ -76,7 +76,7 @@ run_megahit() {
 
 #--- Kraken2 on Contigs Function ---
 run_kraken2_on_contigs() {
-    local sample_name=$1; local assembly_file=$2; local kraken_out_dir=$3; local kraken_db=$4; local threads=$5; local extra_opts="${6}"
+    local sample_name=$1; local assembly_file=$2; local kraken_out_dir=$3; local kraken_db=$4; local threads=$5; local extra_opts="${6:-}"
     
     mkdir -p "$kraken_out_dir"
     
@@ -94,45 +94,78 @@ run_kraken2_on_contigs() {
 
 #--- Bakta Annotation Function for Contigs (출력 경로 수정) ---
 run_bakta_for_contigs() {
-    local sample_name=$1; local assembly_dir=$2; local out_dir=$3; local bakta_db_path=$4; local tmp_dir=$5; local extra_opts="${6}"
+    local sample_name=$1; local assembly_dir=$2; local out_dir=$3; local bakta_db_path=$4; local tmp_dir=$5; local extra_opts="${6:-}"
     
     log_info "${sample_name}: Running Bakta annotation on assembled contigs..."
-    mkdir -p "$out_dir"
+#    mkdir -p "$out_dir"
     
     local contig_file="${assembly_dir}/final.contigs.fa"
+    local final_gff_file="${out_dir}/${sample_name}.gff3"
+
     if [[ ! -f "$contig_file" ]]; then
         log_warn "Assembly file not found for Bakta. Skipping."
         return 1
     fi
 
-    # --- 변경점: 최종 결과 파일 경로를 샘플 디렉토리 바로 아래로 지정 ---
-    local final_gff_file="${out_dir}/${sample_name}.gff3"
-
-    # Checkpoint: 최종 gff3 파일이 있는지 확인
     if [[ -f "$final_gff_file" ]]; then
         log_info "Bakta annotation for contigs of ${sample_name} already exists. Skipping."
         return 0
     fi
+
+#    # --- 변경점: 최종 결과 파일 경로를 샘플 디렉토리 바로 아래로 지정 ---
+#    local final_gff_file="${out_dir}/${sample_name}.gff3"
+#
+#    # Checkpoint: 최종 gff3 파일이 있는지 확인
+#    if [[ -f "$final_gff_file" ]]; then
+#        log_info "Bakta annotation for contigs of ${sample_name} already exists. Skipping."
+#        return 0
+#    fi
     
     local bakta_options=("--threads" "$THREADS" "--meta" "--skip-plot" "--tmp-dir" "$tmp_dir")
     if [[ -n "$bakta_db_path" ]]; then
         bakta_options+=(--db "$bakta_db_path")
     fi
     # 최종 파일은 없지만 폴더가 있는 경우(중단된 경우) --force 옵션 추가
-    if [[ -d "$out_dir" && ! -f "$final_gff_file" ]]; then
+    if [[ -d "$out_dir" ]]; then
+        log_info "Previous incomplete output found. Overwriting..."
         bakta_options+=(--force)
     fi
 
-    conda run -n "$BAKTA_ENV" bakta \
-        --output "$out_dir" \
-        --prefix "$sample_name" \
-        "${bakta_options[@]}" \
-        "$contig_file" $extra_opts
+#    conda run -n "$BAKTA_ENV" bakta \
+#        --output "$out_dir" \
+#        --prefix "$sample_name" \
+#        "${bakta_options[@]}" \
+#        $extra_opts \
+#        "$contig_file"
+
+    # [수정 3] Conda Activate 방식 적용 (Conda 경로 자동 탐지)
+    (
+        # 현재 실행 중인 Conda의 기본 경로를 찾음
+        CONDA_BASE=$(conda info --base)
+        
+        # conda.sh를 source하여 activate 명령어 활성화
+        if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
+            source "${CONDA_BASE}/etc/profile.d/conda.sh"
+        else
+            # 혹시 경로가 다를 경우를 대비한 예비책
+            source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/miniconda3/etc/profile.d/conda.sh
+        fi
+
+        conda activate "$BAKTA_ENV"
+        
+        # Bakta 실행 (옵션 순서 정리)
+        bakta \
+            --output "$out_dir" \
+            --prefix "$sample_name" \
+            "${bakta_options[@]}" \
+            $extra_opts \
+            "$contig_file"
+    )
 }
 
 #--- Bakta Annotation Function for MAGs (Checkpoint 강화 버전) ---
 run_bakta_for_mags() {
-    local sample_name=$1; local bins_dir=$2; local out_dir=$3; local bakta_db_path=$4; local tmp_dir=$5; local extra_opts="${6}"
+    local sample_name=$1; local bins_dir=$2; local out_dir=$3; local bakta_db_path=$4; local tmp_dir=$5; local extra_opts="${6:-}"
     
     # === [설정] 동시 실행할 Bakta 개수 ===
     # (주의: Bakta 하나당 메모리를 꽤 쓰므로 2~4개 추천)
@@ -170,6 +203,12 @@ run_bakta_for_mags() {
         # 이미 완료된 Bin은 건너뜀
         if grep -Fxq "$base_name" "$checkpoint_file"; then continue; fi
 
+        # 이미 '실행 중'인 Bin 건너 뜀 (중복 실행 방지)
+        local processing_flag="${out_dir}/${base_name}.processing"
+        if [[ -f "$processing_flag" ]]; then
+            continue
+        fi
+
         local bakta_output_subdir="${out_dir}/${base_name}"
         local final_gff_file="${bakta_output_subdir}/${base_name}.gff3"
         
@@ -180,6 +219,9 @@ run_bakta_for_mags() {
         # [핵심] Job Limiter: 실행 중인 작업이 꽉 찼으면 대기
         while [ $(jobs -r | wc -l) -ge "$MAX_BAKTA_JOBS" ]; do sleep 5; done
         
+        # 실행 시작 표시 
+        touch "$processing_flag"
+
         # [핵심] 백그라운드(&)로 실행
         (
             log_info "  [Start] Annotating MAG: ${base_name}"
@@ -188,8 +230,11 @@ run_bakta_for_mags() {
             else
                 log_warn "  [Fail] Bakta annotation failed for ${base_name}."
             fi
+
+            # 작업 종료 후 깃발 제거
+            rm -f "$processing_flag"
         ) & 
-        
+
     done
     
     # --- 모든 작업이 끝날 때까지 대기 ---
@@ -273,13 +318,18 @@ run_metawrap_sample() {
     local metawrap_sample_dir=$5
     local min_completeness=$6  
     local max_contamination=$7
-    local binning_extra_opts="${8}"
-    local refinement_extra_opts="${9}"
+    local binning_extra_opts="${8:-}"
+    local refinement_extra_opts="${9:-}"
 
     local final_bins_dir="${metawrap_sample_dir}/bin_refinement/metawrap_${min_completeness}_${max_contamination}_bins"
     
-    if [[ -d "$final_bins_dir" ]]; then
-        log_info "${sample_name}: MetaWRAP pipeline already completed. Skipping."
+#    if [[ -d "$final_bins_dir" ]]; then
+#        log_info "${sample_name}: MetaWRAP pipeline already completed. Skipping."
+#        return 0
+#    fi
+
+    if [[ -d "$final_bins_dir" && -n "$(ls -A "$final_bins_dir" 2>/dev/null)" ]]; then
+        log_info "${sample_name}: MetaWRAP pipeline already completed (Bins found). Skipping."
         return 0
     fi
 
@@ -297,10 +347,10 @@ run_metawrap_sample() {
 
     # 2. 압축 해제된 파일로 metawrap read_qc 수행
     if [[ ! -d "$read_qc_dir" || -z "$(ls -A "$read_qc_dir")" ]]; then
-        log_info "${sample_name}: Running MetaWRAP read_qc module..."
+        log_info "${sample_name}: Running MetaWRAP read_qc module (Pairing Check)..."
         conda run -n "$METAWRAP_ENV" metawrap read_qc \
             -1 "$r1_uncompressed" -2 "$r2_uncompressed" \
-            -t 2 -o "$read_qc_dir" \
+            -t "$THREADS" -o "$read_qc_dir" \
             --skip-bmtagger --skip-pre-qc-report --skip-post-qc-report --skip-trimming
     else
         log_info "${sample_name}: MetaWRAP read_qc results found. Skipping."
@@ -334,7 +384,7 @@ run_metawrap_sample() {
 
 #--- GTDB-Tk Classification Function ---
 run_gtdbtk() {
-    local sample_name=$1; local final_bins_dir=$2; local gtdbtk_out_dir=$3; local extra_opts="${4}"
+    local sample_name=$1; local final_bins_dir=$2; local gtdbtk_out_dir=$3; local extra_opts="${4:-}"
     
     mkdir -p "$gtdbtk_out_dir"
     
@@ -349,20 +399,50 @@ run_gtdbtk() {
         return 1
     fi
     
-    log_info "${sample_name}: Running GTDB-Tk classification on final MAGs...";
+    log_info "${sample_name}: Running GTDB-Tk classification ...";
     
     # 이전에 불완전하게 생성된 결과 폴더가 있다면 삭제하고 새로 시작합니다.
     if [ -d "${gtdbtk_out_dir}/classify" ]; then
-        log_warn "Incomplete GTDB-Tk output directory found. Removing and starting fresh."
+        log_warn "Incomplete GTDB-Tk output directory found. Cleaning up..."
         rm -rf "${gtdbtk_out_dir:?}"/*
     fi
-    
-    conda run -n "$GTDBTK_ENV" bash -c "export GTDBTK_DATA_PATH='${GTDBTK_DATA_PATH}'; gtdbtk classify_wf \
-        --genome_dir '${final_bins_dir}' \
-        --out_dir '${gtdbtk_out_dir}' \
-        --cpus '${THREADS}' \
-        -x fa \
-        --skip_ani_screen ${extra_opts}"
+
+    (
+        # Conda 경로 자동 탐지
+        CONDA_BASE=$(conda info --base)
+        if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
+            source "${CONDA_BASE}/etc/profile.d/conda.sh"
+        else
+            source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh
+        fi
+        
+        # 환경 활성화
+        conda activate "$GTDBTK_ENV"
+        
+        # 환경변수 설정 (활성화된 쉘 내부에서)
+        export GTDBTK_DATA_PATH="${GTDBTK_DATA_PATH}"
+        
+        # GTDB-Tk 실행
+        if gtdbtk classify_wf \
+            --genome_dir "${final_bins_dir}" \
+            --out_dir "${gtdbtk_out_dir}" \
+            --cpus "${THREADS}" \
+            -x fa \
+            --skip_ani_screen \
+            ${extra_opts}; then
+            
+            log_info "GTDB-Tk finished successfully for ${sample_name}."
+        else
+            log_error "GTDB-Tk failed for ${sample_name}."
+            exit 1
+        fi
+    )
+    # conda run -n "$GTDBTK_ENV" bash -c "export GTDBTK_DATA_PATH='${GTDBTK_DATA_PATH}'; gtdbtk classify_wf \
+    #    --genome_dir '${final_bins_dir}' \
+    #    --out_dir '${gtdbtk_out_dir}' \
+    #    --cpus '${THREADS}' \
+    #    -x fa \
+    #    --skip_ani_screen ${extra_opts}"
 }
 
 # --- Automated Pipeline Self-Test Function ---

@@ -320,7 +320,7 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
         #if [ -f "$KRAKEN2_SUCCESS_FLAG" ]; then
         #    log_info "${SAMPLE}: Kraken2 단계가 이미 완료되었습니다. 건너뜁니다."
         #else
-        if [ -f "$KRAKEN2_SUCCESS_FLAG" ]; then
+        if [ ! -f "$KRAKEN2_SUCCESS_FLAG" ]; then
             log_info "  [Kraken2 WAIT] $SAMPLE is waiting for lock..."
 
             # [신규 추가] Kraken2 전용 잠금 (순차 실행 보장)
