@@ -8,6 +8,7 @@ FULL_COMMAND_RUN_ALL="$0 \"$@\""
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 PROJECT_ROOT_DIR=$(dirname "$SCRIPT_DIR")
+LOG_FILE="/dev/null"
 
 # [필수] 라이브러리 로드 (이게 없으면 오류남)
 if [ -f "${PROJECT_ROOT_DIR}/lib/pipeline_functions.sh" ]; then
@@ -157,6 +158,9 @@ log_info "The pipeline will run in a loop, processing new samples."
 
 export DOKKAEBI_MASTER_COMMAND="$FULL_COMMAND_RUN_ALL"
 mkdir -p "$P1_OUTPUT_DIR" "$P2_OUTPUT_DIR"
+
+LOG_FILE="${OUTPUT_DIR}/master_pipeline.log"
+touch "$LOG_FILE
 
 QC_RETRY_COUNT=0; VERIFY_RETRY_COUNT=0; MAG_RETRY_COUNT=0; MAX_RETRIES=2; LOOP_SLEEP_SEC=1800
 
