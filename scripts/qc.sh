@@ -176,6 +176,9 @@ for ((i=1; i<=MAX_KNEAD_JOBS; i++)); do touch "${LOCK_DIR}/knead_slot_${i}"; don
 log_info "Starting Pipeline Loop..."
 #log_info "Strategy: KneadData ($MAX_KNEAD_JOBS parallel) -> Release -> Kraken2 ($MAX_KRAKEN_JOBS serial)"
 
+if [ -d "/dev/shm" ]; then STATUS_DIR="/dev/shm/dokkaebi_status"; else STATUS_DIR="/tmp/dokkaebi_status"; fi
+rm -f "${STATUS_DIR}"/*.status
+
 TOTAL_FILES=$(find "$RAW_DIR" -maxdepth 1 -name "*_1.fastq.gz" -o -name "*_R1.fastq.gz" | wc -l)
 CURRENT_COUNT=0
 
@@ -195,7 +198,8 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
 
     # printf "\n" >&2; log_info "--- 샘플 '$SAMPLE' 분석 시작 ---"
     
-    CURRENT_COUNT=$((CURRENT_COUNT + 1))
+    #CURRENT_COUNT=$((CURRENT_COUNT + 1))
+    ((CURRENT_COUNT++))
     print_progress_bar "$CURRENT_COUNT" "$TOTAL_FILES" "$SAMPLE"
 
     # 각 단계를 위한 성공 플래그 경로를 먼저 정의합니다.
@@ -214,10 +218,14 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
     if [ -f "$PROCESSING_FLAG" ]; then continue; fi
 
     # [신규 추가] 대기열 관리 (서버 과부하 방지)
-    while [ $(jobs -p | wc -l) -ge "$MAX_PENDING_JOBS" ]; do sleep 5; done
-
+    while [ $(jobs -p | wc -l) -ge "$MAX_PENDING_JOBS" ]; do 
+        sleep 2
+        # 대기 중에도 화면 갱신 (상태 변화 반영)
+        print_progress_bar "$CURRENT_COUNT" "$TOTAL_FILES" "Waiting..."
+    done
+    
     touch "$PROCESSING_FLAG"
-    log_info "[Queue] $SAMPLE added to pipeline queue."
+    # log_info "[Queue] $SAMPLE added to pipeline queue."
 
     # ===========================================================
     #  [핵심 수정] 백그라운드 실행 그룹 (비동기 처리) 시작
@@ -258,8 +266,10 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
                 # KneadData에 사용할 스레드 수를 계산합니다. (입력된 스레드의 절반, 최소 1개 보장)
                 #KNEADDATA_THREADS=$((THREADS / 2))
                 #if (( KNEADDATA_THREADS < 1 )); then
-                KNEADDATA_THREADS=$((THREADS_PER_JOB / 1.5))
-                if (( KNEADDATA_THREADS < 1 )); then KNEADDATA_THREADS=1; fi
+                #KNEADDATA_THREADS=$((THREADS_PER_JOB / 1.5))
+                #if (( KNEADDATA_THREADS < 1 )); then KNEADDATA_THREADS=1; fi
+                KNEADDATA_THREADS="$THREADS_PER_JOB"
+                if [[ "$KNEADDATA_THREADS" -lt 1 ]]; then KNEADDATA_THREADS=1; fi
                 #log_info "Allocating ${KNEADDATA_THREADS} threads to KneadData (half of the requested ${THREADS})."
                 
                 decompressed_files=($(decompress_fastq "$SAMPLE" "$R1" "$R2" "$WORK_DIR"))

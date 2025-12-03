@@ -377,97 +377,79 @@ check_for_new_input_files() {
 }
 
 # ==========================================================
-# --- [Pro 3.3] Dynamic Status Monitor Functions ---
+# --- [Pro 3.3] Dashboard Status Monitor Functions ---
 # ==========================================================
 
-# 1. 상태 보고용 디렉토리 설정 (임시 폴더 사용)
-# 이 변수는 모든 스크립트에서 공유됩니다.
-export JOB_STATUS_DIR="/dev/shm/dokkaebi_status" # 속도를 위해 RAM disk 사용 권장
+# 1. 상태 보고용 디렉토리 설정 (속도를 위해 /dev/shm 권장)
+if [ -d "/dev/shm" ]; then
+    export JOB_STATUS_DIR="/dev/shm/dokkaebi_status"
+else
+    export JOB_STATUS_DIR="/tmp/dokkaebi_status"
+fi
 mkdir -p "$JOB_STATUS_DIR"
 
-# 2. 작업 상태 업데이트 함수 (각 병렬 작업 내부에서 호출)
-# 사용법: set_job_status "SampleName" "Current Step Description"
+# 2. 상태 업데이트 (병렬 작업 내부용)
 set_job_status() {
-    local sample=$1
-    local status=$2
-    echo " ➤ [${sample}] ${status}" > "${JOB_STATUS_DIR}/${sample}.status"
+    local sample=$1; local status=$2
+    echo "   ├─ [${sample}] ${status}" > "${JOB_STATUS_DIR}/${sample}.status"
 }
 
-# 3. 작업 완료 시 상태 삭제 함수
-# 사용법: clear_job_status "SampleName"
+# 3. 상태 삭제 (작업 완료 시)
 clear_job_status() {
     local sample=$1
     rm -f "${JOB_STATUS_DIR}/${sample}.status"
 }
 
-# 4. [핵심] 멀티라인 진행바 출력 함수
+# 4. 대시보드 출력 (메인 스크립트용)
 print_progress_bar() {
-    local current=$1
-    local total=$2
-    local sample_name=$3
+    local current=$1; local total=$2; local sample_name=$3
     
     if [ "$total" -eq 0 ]; then total=1; fi
     local percent=$(( 100 * current / total ))
-    local bar_len=30
+    local bar_len=40
     local filled_len=$(( percent * bar_len / 100 ))
     local empty_len=$(( bar_len - filled_len ))
 
     # --- Bar Design ---
-    local filled_part=""; local empty_part=""
-    if [ "$filled_len" -gt 0 ]; then
-        local spaces=$(printf "%${filled_len}s" "")
-        filled_part="\033[47m${spaces}\033[0m" 
+    local bar_str=""
+    if [ "$filled_len" -gt 0 ]; then bar_str+="$(printf "%0.s#" $(seq 1 $filled_len))"; fi
+    if [ "$empty_len" -gt 0 ]; then bar_str+="$(printf "%0.s." $(seq 1 $empty_len))"; fi
+
+    # --- 화면 출력 ---
+    # 1. 이전 출력이 있었다면 그만큼 커서를 위로 올림
+    local lines_to_clear=${LAST_PRINT_LINES:-0}
+    if [ "$lines_to_clear" -gt 0 ]; then
+        printf "\033[%dA" "$lines_to_clear" >&2
     fi
-    if [ "$empty_len" -gt 0 ]; then
-        local dots=$(printf "%${empty_len}s" "" | tr ' ' '·')
-        empty_part="\033[90m${dots}\033[0m"
-    fi
 
-    # --- 화면 출력 (Verbose 모드 아닐 때만) ---
-    if [ "$VERBOSE_MODE" = false ]; then
-        # 1. 커서를 위로 올려서 이전 출력 덮어쓰기 준비 (이전 출력 라인 수만큼 UP)
-        # 최초 실행시엔 LAST_LINES 변수가 없으므로 0으로 처리
-        local lines_to_clear=${LAST_PRINT_LINES:-0}
-        if [ "$lines_to_clear" -gt 0 ]; then
-            # 커서를 위로 N칸 이동 (\033[nA)
-            printf "\033[%dA" "$lines_to_clear" >&2
-        fi
+    # 2. 메인 진행바 출력 (한 줄)
+    # \033[K : 줄 끝까지 내용 지움 (잔상 제거)
+    printf "\r\033[K [Progress] [%s] %3d%% | Latest: %s\n" "$bar_str" "$percent" "$sample_name" >&2
 
-        # 2. 메인 진행바 출력 (한 줄)
-        # \033[K : 커서 위치부터 줄 끝까지 지움 (잔상 제거)
-        printf "\r\033[K [Progress] [${filled_part}${empty_part}] %3d%% | Processing: %s\n" "$percent" "$sample_name" >&2
-
-        # 3. 병렬 작업 상태 출력 (최대 4줄 + a)
-        local active_jobs_output=""
-        local line_count=1 # 진행바 1줄 포함
-
-        # status 폴더에 있는 파일들을 읽어서 출력
-        # 파일이 없으면 아무것도 출력 안 함
-        if [ -d "$JOB_STATUS_DIR" ]; then
-            # sort로 정렬해서 출력 흔들림 방지
-            while IFS= read -r status_line; do
-                if [[ -n "$status_line" ]]; then
-                    printf "\033[K   %s\n" "$status_line" >&2
-                    ((line_count++))
-                fi
-            done < <(find "$JOB_STATUS_DIR" -name "*.status" -maxdepth 1 -type f -exec cat {} + | sort)
-        fi
-        
-        # 4. 빈 줄 채우기 (화면 울렁거림 방지용 - 최대 5줄 확보)
-        # 병렬 작업이 4개면 총 5줄(바1 + 작업4), 작업이 1개면 빈 줄 3개 출력
-        local min_lines=5 
-        while [ "$line_count" -lt "$min_lines" ]; do
-            printf "\033[K\n" >&2
-            ((line_count++))
-        done
-
-        # 5. 다음번 출력을 위해 현재 출력한 총 라인 수 저장
-        export LAST_PRINT_LINES="$line_count"
-
-    else
-        # Verbose 모드
-        log_info "--- [${current}/${total}] ${percent}% Processing: ${sample_name} ---"
+    # 3. 병렬 작업 상태 출력 (최대 4줄)
+    local line_count=1 # 진행바 1줄 포함
+    
+    if [ -d "$JOB_STATUS_DIR" ]; then
+        # 상태 파일들을 읽어서 정렬 후 출력
+        while IFS= read -r status_line; do
+            if [[ -n "$status_line" ]]; then
+                printf "\033[K%s\n" "$status_line" >&2
+                ((line_count++))
+            fi
+        done < <(grep -h "" "${JOB_STATUS_DIR}"/*.status 2>/dev/null | sort)
     fi
     
+    # 4. 화면 흔들림 방지를 위한 빈 줄 채우기 (항상 6줄 확보)
+    # (병렬 작업이 4개 미만일 때도 화면 높이를 고정해서 울렁거림 방지)
+    local min_lines=6
+    while [ "$line_count" -lt "$min_lines" ]; do
+        printf "\033[K\n" >&2
+        ((line_count++))
+    done
+
+    # 5. 이번에 출력한 라인 수 저장 (다음 턴에 지우기 위해)
+    export LAST_PRINT_LINES="$line_count"
+    
+    # 로그 파일에는 간단하게 한 줄만 기록
     echo "[PROGRESS] [${current}/${total}] ${percent}% - Processing: ${sample_name}" >> "$LOG_FILE"
 }
