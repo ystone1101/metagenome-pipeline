@@ -436,7 +436,7 @@ print_progress_bar() {
                 printf "\033[K%s\n" "$status_line" >&2
                 ((line_count++))
             fi
-        done < <(grep -h "" "${JOB_STATUS_DIR}"/*.status 2>/dev/null | sort)
+        done < <(find "${JOB_STATUS_DIR}" -maxdepth 1 -name "*.status" -type f -exec cat {} + 2>/dev/null | sort)
     fi
     
     # 4. 화면 흔들림 방지를 위한 빈 줄 채우기 (항상 6줄 확보)
