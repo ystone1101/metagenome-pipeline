@@ -68,6 +68,8 @@ print_usage() {
     echo -e "${CYAN}${BOLD}Tool-specific Options (pass-through):${NC}"
     echo "  --keep-temp-files        - Do not delete intermediate temporary files (for debugging)."
     echo "  --skip-contig-analysis   - Skip Kraken2 and Bakta analysis on assembled contigs."    
+    echo "  --skip-bakta             - Skip ONLY Bakta analysis on contigs."
+    echo "  --verbose             - Show detailed logs in terminal instead of progress bar."      
     echo "  --megahit-opts OPTS     - Pass additional options to MEGAHIT (in quotes)."
     echo "  --metawrap-binning-opts OPTS   - Pass additional options to MetaWRAP's binning module."
     echo "  --metawrap-refinement-opts OPTS - Pass additional options to MetaWRAP's bin_refinement module."
@@ -92,7 +94,9 @@ RUN_MODE="all"
 RUN_TEST_MODE=false
 KEEP_TEMP_FILES=false
 SKIP_CONTIG_ANALYSIS=false
+SKIP_BAKTA=false
 INPUT_DIR_ARG=""
+RAW_INPUT_DIR=""
 OUTPUT_DIR_ARG=""
 THREADS=6
 MEMORY_GB=60
@@ -118,9 +122,11 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --test) RUN_TEST_MODE=true; shift ;;
         --keep-temp-files) KEEP_TEMP_FILES=true; shift ;;
-        --skip-contig-analysis) SKIP_CONTIG_ANALYSIS=true; shift ;;        
+        --skip-contig-analysis) SKIP_CONTIG_ANALYSIS=true; shift ;;
+        --skip-bakta) SKIP_BAKTA=true; shift ;;        
         megahit|metawrap|all|post-process) RUN_MODE=$1; shift ;;
         --input_dir) INPUT_DIR_ARG="${2%/}"; shift 2 ;;
+        --raw_input_dir) RAW_INPUT_DIR="${2%/}"; shift 2 ;;
         --output_dir) OUTPUT_DIR_ARG="${2%/}"; shift 2 ;;        
         --threads) THREADS="$2"; shift 2 ;;
         --memory_gb) MEMORY_GB="$2"; shift 2 ;;
@@ -138,6 +144,7 @@ while [ $# -gt 0 ]; do
         --kraken2-opts) KRAKEN2_EXTRA_OPTS="$2"; shift 2 ;;
         --gtdbtk-opts) GTDBTK_EXTRA_OPTS="$2"; shift 2 ;;
         --bakta-opts) BAKTA_EXTRA_OPTS="$2"; shift 2 ;;
+        --verbose) VERBOSE_MODE=true; shift ;;
         *) shift ;;
     esac
 done
@@ -303,6 +310,8 @@ log_info "Output directory: ${MAG_BASE_DIR}"
 log_info "Run mode        : ${RUN_MODE}"
 log_info "Threads         : ${THREADS}"
 log_info "Memory for MEGAHIT: ${MEMORY_GB}G"
+log_info "Skip Contigs    : ${SKIP_CONTIG_ANALYSIS}"
+log_info "Skip Bakta      : ${SKIP_BAKTA}"
 if [[ -n "$GTDBTK_DATA_PATH" ]]; then log_info "GTDB-Tk DB path : ${GTDBTK_DATA_PATH}"; fi
 log_info "Bakta DB path   : ${BAKTA_DB_DIR_ARG}"
 log_info "------------------------------"
@@ -342,6 +351,9 @@ if [ -z "$(ls -A "${QC_READS_DIR}"/*_1.fastq.gz 2>/dev/null)" ]; then
     exit 0
 fi
 
+TOTAL_SAMPLES=$(find "${QC_READS_DIR}" -maxdepth 1 -name "*_1.fastq.gz" | wc -l)
+CURRENT_PROGRESS=0
+
 for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
 #    if [[ ! -f "$R1_QC_GZ" ]]; then continue; fi
     # --- 샘플 정보 설정 ---
@@ -363,7 +375,9 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     
     if [[ ! -f "$R2_QC_GZ" ]]; then log_warn "Paired QC file for $SAMPLE not found."; continue; fi
 
-    printf "\n" >&2; log_info "--- Processing sample '$SAMPLE' ---"
+    # printf "\n" >&2; log_info "--- Processing sample '$SAMPLE' ---"
+    ((CURRENT_PROGRESS++))
+    print_progress_bar "$CURRENT_PROGRESS" "$TOTAL_SAMPLES" "$SAMPLE"    
 
     # 체크포인트 방식을 모두 .success 성공 플래그로 통일
     REPAIR_SUCCESS_FLAG="${REPAIR_DIR}/.${SAMPLE}.repair.success"
@@ -392,15 +406,23 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         if [[ ! -f "$ASSEMBLY_FA" ]]; then
             log_warn "Assembly file not found for ${SAMPLE}. Skipping contig-level post-analysis."
         else
-            KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
-            run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS"
+            if [ "$SKIP_CONTIG_ANALYSIS" = false ]; then
+                KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
+                run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS"
             
-            BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
-            run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
+                if [ "$SKIP_BAKTA" = false ]; then
+                    BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
+                    run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
+                else
+                    log_info "Skipping Bakta on contigs (--skip-bakta enabled)"
+                fi
+
+            else
+                log_info "Skipping ALL contig analysis (Kraken2 & Bakta)"
+            fi   
         fi
 
         # MAG 분석
-        FINAL_BINS_DIR="${METAWRAP_DIR}/${SAMPLE}/bin_refinement/metawrap_${MIN_COMPLETENESS}_${MAX_CONTAMINATION}_bins"
         if [[ ! -d "$FINAL_BINS_DIR" ]]; then
             log_warn "Final MAGs not found for ${SAMPLE}. Skipping MAG-level post-analysis."
         else
@@ -456,8 +478,13 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                         KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
                         run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS"
                         
-                        BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
-                        run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
+                        if [ "$SKIP_BAKTA" = false ]; then
+                            BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
+                            run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
+                        else
+                            log_info "Skipping Bakta on contigs (--skip-bakta enabled)."
+                        fi
+
                     else
                         log_info "--skip-contig-analysis enabled. Skipping Kraken2 and Bakta on contigs."
                     fi
@@ -518,14 +545,16 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     # (실제 Master Script에서 P1_STATE_FILE 경로를 전달해야 합니다.)
     MASTER_STATE_FILE="${MAG_BASE_DIR}/../1_microbiome_taxonomy/.pipeline.state"
     
-    if check_for_new_input_files "$INPUT_DIR_ARG" "$MASTER_STATE_FILE"; then
-        : # 변화 없음 (계속 다음 MAG 분석)
-    else
-        # 99 코드가 반환됨 -> 즉시 루프 중단 후 마스터 스크립트로 신호 전달
-        log_info "New input detected during MAG run. SIGNALLING MASTER to re-run QC."
-        exit 99 
+    if [[ -n "$RAW_INPUT_DIR" && -f "$MASTER_STATE_FILE" && -n "${DOKKAEBI_MASTER_COMMAND-}" ]]; then
+        if check_for_new_input_files "$INPUT_DIR_ARG" "$MASTER_STATE_FILE"; then
+            : # 변화 없음 (계속 다음 MAG 분석)
+        else
+            # 99 코드가 반환됨 -> 즉시 루프 중단 후 마스터 스크립트로 신호 전달
+            log_info "New input detected during MAG run. SIGNALLING MASTER to re-run QC."
+            exit 99 
+        fi
     fi
-    
+
 done
 
 # --- 모든 작업이 성공적으로 끝나면, 새로운 상태를 공식 상태로 저장합니다. ---

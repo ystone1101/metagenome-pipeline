@@ -9,6 +9,13 @@ FULL_COMMAND_RUN_ALL="$0 \"$@\""
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 PROJECT_ROOT_DIR=$(dirname "$SCRIPT_DIR")
 
+# [필수] 라이브러리 로드 (이게 없으면 오류남)
+if [ -f "${PROJECT_ROOT_DIR}/lib/pipeline_functions.sh" ]; then
+    source "${PROJECT_ROOT_DIR}/lib/pipeline_functions.sh"
+else
+    echo "Error: pipeline_functions.sh not found." >&2; exit 1
+fi
+
 # --- 1. 사용법 안내 함수 ---
 print_usage() {
     # 색상 코드 정의
@@ -53,6 +60,9 @@ print_usage() {
     echo -e "${CYAN}${BOLD}Optional Options:${NC}"
     echo "  --threads INT         - Number of threads for all tools. (Default: 6)"
     echo "  --memory_gb INT       - Max memory in Gigabytes for KneadData and MEGAHIT. (Default: 60)"
+    echo "  --verbose             - Show detailed logs in terminal instead of progress bar."
+    echo "  --skip-contig-analysis   - Skip Kraken2 and Bakta analysis on assembled contigs."    
+    echo "  --skip-bakta             - Skip ONLY Bakta analysis on contigs."
     echo "  -h, --help            - Display this help message and exit."
     echo ""    
     echo ""
@@ -84,6 +94,10 @@ THREADS=6; MEMORY_GB="60"
 KNEADDATA_OPTS=""; FASTP_OPTS=""; KRAKEN2_OPTS=""; MEGAHIT_OPTS=""; METAWRAP_BINNING_OPTS=""
 METAWRAP_REFINEMENT_OPTS=""; GTDBTK_OPTS=""; BAKTA_OPTS=""
 
+SKIP_CONTIG_ANALYSIS=false
+SKIP_BAKTA=false
+VERBOSE_MODE=false 
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --input_dir) INPUT_DIR="${2%/}"; shift 2 ;;
@@ -100,11 +114,16 @@ while [ $# -gt 0 ]; do
         --megahit-opts) MEGAHIT_OPTS="$2"; shift 2 ;;
         --metawrap-binning-opts) METAWRAP_BINNING_OPTS="$2"; shift 2 ;;
         --metawrap-refinement-opts) METAWRAP_REFINEMENT_OPTS="$2"; shift 2 ;;
+        --skip-contig-analysis) SKIP_CONTIG_ANALYSIS=true; shift ;;
+        --skip-bakta) SKIP_BAKTA=true; shift ;;
         --gtdbtk-opts) GTDBTK_OPTS="$2"; shift 2 ;;
         --bakta-opts) BAKTA_OPTS="$2"; shift 2 ;;
+        --verbose) VERBOSE_MODE=true; shift ;;
         *) shift ;;
     esac
 done
+
+export VERBOSE_MODE
 
 # --- 3. 필수 인자 확인 ---
 declare -a error_messages=()
@@ -116,7 +135,7 @@ if [[ -z "$BAKTA_DB" ]]; then error_messages+=("  - --bakta_db is required."); f
 if [[ "$P1_MODE" == "host" && -z "$HOST_DB" ]]; then error_messages+=("  - --host_db is required for 'host' mode."); fi
 
 if [ ${#error_messages[@]} -gt 0 ]; then
-    log_error "The following required arguments are missing:"
+    log_error "Missing arguments:"
     for msg in "${error_messages[@]}"; do
         log_error "$msg"
     done
@@ -137,23 +156,19 @@ log_info "Logic: Run QC -> Check Inputs -> (If new) Repeat QC -> (If stable) Run
 log_info "The pipeline will run in a loop, processing new samples."
 
 export DOKKAEBI_MASTER_COMMAND="$FULL_COMMAND_RUN_ALL"
-
 mkdir -p "$P1_OUTPUT_DIR" "$P2_OUTPUT_DIR"
 
-# [설정] 재시도 제한 횟수
-QC_RETRY_COUNT=0
-VERIFY_RETRY_COUNT=0  # [추가] 결과물 검증 실패 카운터
-MAG_RETRY_COUNT=0
-MAX_RETRIES=2
-LOOP_SLEEP_SEC=1800 # 30분 대기
+QC_RETRY_COUNT=0; VERIFY_RETRY_COUNT=0; MAG_RETRY_COUNT=0; MAX_RETRIES=2; LOOP_SLEEP_SEC=1800
 
 while true; do
+    QC_RETRY_COUNT=0; VERIFY_RETRY_COUNT=0; MAG_RETRY_COUNT=0
+
     # -------------------------------------------------------
     # [1단계] QC 무한 루프
     # -------------------------------------------------------
     while true; do
         log_info "--- [Phase 1] Running QC Pipeline (Attempt: $((QC_RETRY_COUNT+1))) ---"
-    
+
         P1_CMD_ARRAY=(
             bash "${PROJECT_ROOT_DIR}/scripts/qc.sh"
             "${P1_MODE}" --input_dir "${INPUT_DIR}" --output_dir "${P1_OUTPUT_DIR}"
@@ -181,6 +196,7 @@ while true; do
                 exit 1 
             fi
             sleep 60; continue # 재시도
+            
         fi
 
         # 3. [고속 감지] QC 직후, stat 명령어로 입력 폴더 재검사 (0.1초 컷)
@@ -308,6 +324,15 @@ while true; do
             --threads "${THREADS}" --memory_gb "${MEMORY_GB}"
         )
 
+        if [ "$SKIP_CONTIG_ANALYSIS" = true ]; then
+            P2_CMD_ARRAY+=(--skip-contig-analysis)
+        fi
+        
+        # [중요] Bakta 스킵 옵션 전달
+        if [ "$SKIP_BAKTA" = true ]; then
+            P2_CMD_ARRAY+=(--skip-bakta)
+        fi
+
         if [[ -n "$MEGAHIT_OPTS" ]]; then P2_CMD_ARRAY+=(--megahit-opts "$MEGAHIT_OPTS"); fi
         if [[ -n "$METAWRAP_BINNING_OPTS" ]]; then P2_CMD_ARRAY+=(--metawrap-binning-opts "$METAWRAP_BINNING_OPTS"); fi
         if [[ -n "$METAWRAP_REFINEMENT_OPTS" ]]; then P2_CMD_ARRAY+=(--metawrap-refinement-opts "$METAWRAP_REFINEMENT_OPTS"); fi
@@ -361,7 +386,7 @@ while true; do
         log_warn "Reporting library not found. Skipping report generation."
     fi
 
-    log_info "Waiting for next cycle..."
+    # log_info "Waiting for next cycle..."
 
     # =======================================================
     # [Pro 3.0] 종료 신호 감지 (Graceful Shutdown)

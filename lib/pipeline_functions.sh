@@ -7,28 +7,69 @@
 # --- 로깅(Logging) 및 오류 처리 함수 (최종 수정) ---
 # ==========================================================
 
+: "${VERBOSE_MODE:=false}"
+
 # 모든 로깅 함수의 최종 출력을 표준 에러(stderr)로 리디렉션(>&2)하여,
 # 함수의 '반환 값'으로 캡처되지 않도록 수정합니다.
+
 log_info() {
     local message=$1
     local GREEN='\033[0;32m'
     local NC='\033[0m'
-    { echo -e "${GREEN}[INFO]$(date +'%Y-%m-%d %H:%M:%S') | ${message}${NC}" | tee -a "$LOG_FILE"; } >&2
+    local timestamp=$(date +'%Y-%m-%d %H:%M:%S')
+    
+    # [수정] Verbose 모드일 때만 화면 출력, 아니면 파일에만 기록
+    if [ "$VERBOSE_MODE" = true ]; then
+        echo -e "${GREEN}[INFO]${timestamp} | ${message}${NC}" | tee -a "$LOG_FILE" >&2
+    else
+        echo -e "[INFO]${timestamp} | ${message}" >> "$LOG_FILE"
+    fi
 }
+
+# log_info() {
+#    local message=$1
+#    local GREEN='\033[0;32m'
+#    local NC='\033[0m'
+#    { echo -e "${GREEN}[INFO]$(date +'%Y-%m-%d %H:%M:%S') | ${message}${NC}" | tee -a "$LOG_FILE"; } >&2
+# }
 
 log_warn() {
     local message=$1
     local YELLOW='\033[0;33m'
     local NC='\033[0m'
-    { echo -e "${YELLOW}[WARN]$(date +'%Y-%m-%d %H:%M:%S') | ${message}${NC}" | tee -a "$LOG_FILE"; } >&2
+    local timestamp=$(date +'%Y-%m-%d %H:%M:%S')
+
+    # [수정] Warning도 Verbose 모드에 따라 제어 (원하시면 항상 출력으로 변경 가능)
+    if [ "$VERBOSE_MODE" = true ]; then
+        echo -e "${YELLOW}[WARN]${timestamp} | ${message}${NC}" | tee -a "$LOG_FILE" >&2
+    else
+        echo -e "[WARN]${timestamp} | ${message}" >> "$LOG_FILE"
+    fi
 }
+
+# log_warn() {
+#    local message=$1
+#    local YELLOW='\033[0;33m'
+#    local NC='\033[0m'
+#    { echo -e "${YELLOW}[WARN]$(date +'%Y-%m-%d %H:%M:%S') | ${message}${NC}" | tee -a "$LOG_FILE"; } >&2
+#}
 
 log_error() {
     local message=$1
     local RED='\033[0;31m'
     local NC='\033[0m'
-    { echo -e "${RED}[ERROR]$(date +'%Y-%m-%d %H:%M:%S') | ${message}${NC}" | tee -a "$LOG_FILE"; } >&2
+    local timestamp=$(date +'%Y-%m-%d %H:%M:%S')
+
+    # [중요] 에러는 모드 상관없이 항상 화면에도 출력해야 함!
+    echo -e "${RED}[ERROR]${timestamp} | ${message}${NC}" | tee -a "$LOG_FILE" >&2
 }
+
+# log_error() {
+#    local message=$1
+#    local RED='\033[0;31m'
+#    local NC='\033[0m'
+#    { echo -e "${RED}[ERROR]$(date +'%Y-%m-%d %H:%M:%S') | ${message}${NC}" | tee -a "$LOG_FILE"; } >&2
+#}
 
 # --- 2. 에러 트랩 정의 ---
 _error_handler() {
@@ -317,4 +358,53 @@ check_for_new_input_files() {
         rm -f "$CURRENT_STATE_FILE"
         return 99 # MAG 루프를 중단하고 QC로 돌아가라는 신호
     fi
+}
+
+# ==========================================================
+# --- Progress Bar Display Function (White Solid Bar) ---
+# ==========================================================
+print_progress_bar() {
+    local current=$1
+    local total=$2
+    local sample_name=$3
+    
+    # 0으로 나누기 방지
+    if [ "$total" -eq 0 ]; then total=1; fi
+    
+    # 퍼센트 계산
+    local percent=$(( 100 * current / total ))
+    local bar_len=30  # 막대 전체 길이
+    local filled_len=$(( percent * bar_len / 100 ))
+    local empty_len=$(( bar_len - filled_len ))
+
+    # --- [디자인 핵심] ---
+    # 1. 채워진 부분: 흰색 배경(\033[47m)에 공백 출력 -> 하얀 막대처럼 보임
+    # 2. 빈 부분: 회색 글자(\033[90m)로 점(.) 출력 -> 남은 구간 표시
+    
+    local filled_part=""
+    if [ "$filled_len" -gt 0 ]; then
+        # filled_len 만큼 공백을 만들고 배경을 흰색으로 칠함
+        local spaces=$(printf "%${filled_len}s" "")
+        filled_part="\033[47m${spaces}\033[0m" 
+    fi
+    
+    local empty_part=""
+    if [ "$empty_len" -gt 0 ]; then
+        # empty_len 만큼 점(.)을 찍고 회색으로 칠함
+        local dots=$(printf "%${empty_len}s" "" | tr ' ' '·') # 가운데 점(·) 사용
+        empty_part="\033[90m${dots}\033[0m"
+    fi
+
+    # [화면 출력용]
+    if [ "$VERBOSE_MODE" = false ]; then
+        # \r: 커서 복귀, \033[K: 줄 비우기
+        # 디자인: [⬜⬜⬜······] 30%
+        printf "\r\033[K [Progress] [${filled_part}${empty_part}] %3d%% | Processing: %s" "$percent" "$sample_name" >&2
+    else
+        # Verbose 모드일 땐 텍스트로 로그 출력
+        log_info "--- [${current}/${total}] ${percent}% Processing: ${sample_name} ---"
+    fi
+
+    # [로그 파일용] 파일에는 색상 코드를 빼고 기록 (가독성 위해)
+    echo "[PROGRESS] [${current}/${total}] ${percent}% - Processing: ${sample_name}" >> "$LOG_FILE"
 }

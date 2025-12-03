@@ -55,11 +55,12 @@ print_usage() {
     echo "  --threads INT         - Number of threads for all tools. (Default: 6)"
     echo "  --memory MB           - Max memory in Megabytes for KneadData (e.g., 80000). (Default: 60000)"
     echo "  --qc-only             - Run only QC (KneadData/fastp) and skip taxonomic analysis."
+    echo "  --verbose             - Show detailed logs in terminal instead of progress bar."    
     echo ""
     echo -e "${CYAN}${BOLD}Tool-specific Options (pass-through):${NC}"    
     echo "  --kneaddata-opts OPTS - Pass additional options to KneadData (in quotes)."
     echo "  --fastp-opts OPTS     - Pass additional options to fastp (in quotes)."
-    echo "  --kraken2-opts OPTS   - Pass additional options to Kraken2 (in quotes)."
+    echo "  --kraken2-opts OPTS   - Pass additional options to Kraken2 (in quotes)."   
     echo "  -h, --help            - Display this help message and exit."
     echo ""    
     echo ""
@@ -95,6 +96,7 @@ while [ $# -gt 0 ]; do
         --fastp-opts) FASTP_EXTRA_OPTS="$2"; shift 2 ;;
         --kraken2-opts) KRAKEN2_EXTRA_OPTS="$2"; shift 2 ;;
         --qc-only) QC_ONLY_MODE=true; shift ;;
+        --verbose) VERBOSE_MODE=true; shift ;;
         *) shift ;;
     esac
 done
@@ -174,6 +176,9 @@ for ((i=1; i<=MAX_KNEAD_JOBS; i++)); do touch "${LOCK_DIR}/knead_slot_${i}"; don
 log_info "Starting Pipeline Loop..."
 #log_info "Strategy: KneadData ($MAX_KNEAD_JOBS parallel) -> Release -> Kraken2 ($MAX_KRAKEN_JOBS serial)"
 
+TOTAL_FILES=$(find "$RAW_DIR" -maxdepth 1 -name "*_1.fastq.gz" -o -name "*_R1.fastq.gz" | wc -l)
+CURRENT_COUNT=0
+
 for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
     # --- 샘플 정보 파싱 --- 
     # [수정 1] R2 경로 생성 로직을 파일 끝에 고정된 단일 명령어로 단순화
@@ -190,6 +195,9 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
 
     # printf "\n" >&2; log_info "--- 샘플 '$SAMPLE' 분석 시작 ---"
     
+    ((CURRENT_COUNT++))
+    print_progress_bar "$CURRENT_COUNT" "$TOTAL_FILES" "$SAMPLE"
+
     # 각 단계를 위한 성공 플래그 경로를 먼저 정의합니다.
     QC_SUCCESS_FLAG="${CLEAN_DIR}/.${SAMPLE}.qc.success"
     KRAKEN2_SUCCESS_FLAG="${KRAKEN_OUT}/.${SAMPLE}.kraken2.success"
