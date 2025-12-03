@@ -354,9 +354,19 @@ check_for_new_input_files() {
         rm -f "$CURRENT_STATE_FILE"
         return 0
     else
-        # 변화 있음 (새 파일 도착!)
-        rm -f "$CURRENT_STATE_FILE"
-        return 99 # MAG 루프를 중단하고 QC로 돌아가라는 신호
+        sleep 5
+        local STABILITY_CHECK_FILE=$(mktemp)
+        find "$raw_dir" -maxdepth 1 -type f -name "*.fastq.gz" -printf "%f\t%s\t%T@\n" | sort > "$STABILITY_CHECK_FILE"
+
+        if diff -q "$CURRENT_STATE_FILE" "$STABILITY_CHECK_FILE" >/dev/null; then
+            # 5초 전과 후가 동일함 -> 전송 완료됨 -> 진짜 변화!
+            rm -f "$CURRENT_STATE_FILE" "$STABILITY_CHECK_FILE"
+            return 99 # 신호 발생
+        else
+            # 5초 사이에 또 변함 -> 아직 전송 중임 -> 이번 턴은 무시하고 대기
+            rm -f "$CURRENT_STATE_FILE" "$STABILITY_CHECK_FILE"
+            return 0 # 아직 준비 안 됨 (변화 없음으로 처리)
+        fi
     fi
 }
 

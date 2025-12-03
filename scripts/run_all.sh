@@ -161,7 +161,22 @@ mkdir -p "$P1_OUTPUT_DIR" "$P2_OUTPUT_DIR"
 QC_RETRY_COUNT=0; VERIFY_RETRY_COUNT=0; MAG_RETRY_COUNT=0; MAX_RETRIES=2; LOOP_SLEEP_SEC=1800
 
 while true; do
+    # =======================================================
+    # [추가] 로그 로테이션 (10MB 초과 시 백업)
+    # =======================================================
+    if [ -f "$LOG_FILE" ]; then
+        LOG_SIZE=$(du -k "$LOG_FILE" | cut -f1)
+        if [ "$LOG_SIZE" -gt 10240 ]; then # 10MB (10240KB)
+            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+            mv "$LOG_FILE" "${LOG_FILE}.${TIMESTAMP}.bak"
+            gzip "${LOG_FILE}.${TIMESTAMP}.bak" & # 백그라운드 압축
+            touch "$LOG_FILE"
+            log_info "Log file rotated due to size limit (>10MB)."
+        fi
+    fi
+
     QC_RETRY_COUNT=0; VERIFY_RETRY_COUNT=0; MAG_RETRY_COUNT=0
+
 
     # -------------------------------------------------------
     # [1단계] QC 무한 루프
