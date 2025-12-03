@@ -377,50 +377,97 @@ check_for_new_input_files() {
 }
 
 # ==========================================================
-# --- Progress Bar Display Function (White Solid Bar) ---
+# --- [Pro 3.3] Dynamic Status Monitor Functions ---
 # ==========================================================
+
+# 1. 상태 보고용 디렉토리 설정 (임시 폴더 사용)
+# 이 변수는 모든 스크립트에서 공유됩니다.
+export JOB_STATUS_DIR="/dev/shm/dokkaebi_status" # 속도를 위해 RAM disk 사용 권장
+mkdir -p "$JOB_STATUS_DIR"
+
+# 2. 작업 상태 업데이트 함수 (각 병렬 작업 내부에서 호출)
+# 사용법: set_job_status "SampleName" "Current Step Description"
+set_job_status() {
+    local sample=$1
+    local status=$2
+    echo " ➤ [${sample}] ${status}" > "${JOB_STATUS_DIR}/${sample}.status"
+}
+
+# 3. 작업 완료 시 상태 삭제 함수
+# 사용법: clear_job_status "SampleName"
+clear_job_status() {
+    local sample=$1
+    rm -f "${JOB_STATUS_DIR}/${sample}.status"
+}
+
+# 4. [핵심] 멀티라인 진행바 출력 함수
 print_progress_bar() {
     local current=$1
     local total=$2
     local sample_name=$3
     
-    # 0으로 나누기 방지
     if [ "$total" -eq 0 ]; then total=1; fi
-    
-    # 퍼센트 계산
     local percent=$(( 100 * current / total ))
-    local bar_len=30  # 막대 전체 길이
+    local bar_len=30
     local filled_len=$(( percent * bar_len / 100 ))
     local empty_len=$(( bar_len - filled_len ))
 
-    # --- [디자인 핵심] ---
-    # 1. 채워진 부분: 흰색 배경(\033[47m)에 공백 출력 -> 하얀 막대처럼 보임
-    # 2. 빈 부분: 회색 글자(\033[90m)로 점(.) 출력 -> 남은 구간 표시
-    
-    local filled_part=""
+    # --- Bar Design ---
+    local filled_part=""; local empty_part=""
     if [ "$filled_len" -gt 0 ]; then
-        # filled_len 만큼 공백을 만들고 배경을 흰색으로 칠함
         local spaces=$(printf "%${filled_len}s" "")
         filled_part="\033[47m${spaces}\033[0m" 
     fi
-    
-    local empty_part=""
     if [ "$empty_len" -gt 0 ]; then
-        # empty_len 만큼 점(.)을 찍고 회색으로 칠함
-        local dots=$(printf "%${empty_len}s" "" | tr ' ' '·') # 가운데 점(·) 사용
+        local dots=$(printf "%${empty_len}s" "" | tr ' ' '·')
         empty_part="\033[90m${dots}\033[0m"
     fi
 
-    # [화면 출력용]
+    # --- 화면 출력 (Verbose 모드 아닐 때만) ---
     if [ "$VERBOSE_MODE" = false ]; then
-        # \r: 커서 복귀, \033[K: 줄 비우기
-        # 디자인: [⬜⬜⬜······] 30%
-        printf "\r\033[K [Progress] [${filled_part}${empty_part}] %3d%% | Processing: %s" "$percent" "$sample_name" >&2
+        # 1. 커서를 위로 올려서 이전 출력 덮어쓰기 준비 (이전 출력 라인 수만큼 UP)
+        # 최초 실행시엔 LAST_LINES 변수가 없으므로 0으로 처리
+        local lines_to_clear=${LAST_PRINT_LINES:-0}
+        if [ "$lines_to_clear" -gt 0 ]; then
+            # 커서를 위로 N칸 이동 (\033[nA)
+            printf "\033[%dA" "$lines_to_clear" >&2
+        fi
+
+        # 2. 메인 진행바 출력 (한 줄)
+        # \033[K : 커서 위치부터 줄 끝까지 지움 (잔상 제거)
+        printf "\r\033[K [Progress] [${filled_part}${empty_part}] %3d%% | Processing: %s\n" "$percent" "$sample_name" >&2
+
+        # 3. 병렬 작업 상태 출력 (최대 4줄 + a)
+        local active_jobs_output=""
+        local line_count=1 # 진행바 1줄 포함
+
+        # status 폴더에 있는 파일들을 읽어서 출력
+        # 파일이 없으면 아무것도 출력 안 함
+        if [ -d "$JOB_STATUS_DIR" ]; then
+            # sort로 정렬해서 출력 흔들림 방지
+            while IFS= read -r status_line; do
+                if [[ -n "$status_line" ]]; then
+                    printf "\033[K   %s\n" "$status_line" >&2
+                    ((line_count++))
+                fi
+            done < <(find "$JOB_STATUS_DIR" -name "*.status" -maxdepth 1 -type f -exec cat {} + | sort)
+        fi
+        
+        # 4. 빈 줄 채우기 (화면 울렁거림 방지용 - 최대 5줄 확보)
+        # 병렬 작업이 4개면 총 5줄(바1 + 작업4), 작업이 1개면 빈 줄 3개 출력
+        local min_lines=5 
+        while [ "$line_count" -lt "$min_lines" ]; do
+            printf "\033[K\n" >&2
+            ((line_count++))
+        done
+
+        # 5. 다음번 출력을 위해 현재 출력한 총 라인 수 저장
+        export LAST_PRINT_LINES="$line_count"
+
     else
-        # Verbose 모드일 땐 텍스트로 로그 출력
+        # Verbose 모드
         log_info "--- [${current}/${total}] ${percent}% Processing: ${sample_name} ---"
     fi
-
-    # [로그 파일용] 파일에는 색상 코드를 빼고 기록 (가독성 위해)
+    
     echo "[PROGRESS] [${current}/${total}] ${percent}% - Processing: ${sample_name}" >> "$LOG_FILE"
 }

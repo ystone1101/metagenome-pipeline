@@ -226,13 +226,19 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
         # [수정] 서브쉘 내부 에러 핸들링 강화
         set -euo pipefail
 
+        set_job_status "$SAMPLE" "Initializing..."
+
         # --- 1. QC 단계 (KneadData 또는 fastp) ---
         r1_for_kraken2=""; r2_for_kraken2=""
     
         if [ -f "$QC_SUCCESS_FLAG" ]; then
             log_info "${SAMPLE}: QC Already Done."
         else
+
+            set_job_status "$SAMPLE" "Waiting for QC slot..."
+
             log_info "${SAMPLE}: 신규 QC 분석을 시작합니다."
+
             MY_SLOT=""
             while true; do
                 for ((i=1; i<=MAX_KNEAD_JOBS; i++)); do
@@ -242,18 +248,20 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
                 done
                 sleep 5
             done
-
+            
             log_info "  [KneadData START] $SAMPLE (Slot #$MY_SLOT)"
+            
             #cleaned_files_str="" # 결과 경로를 담을 변수 초기화
             
             if [[ "$MODE" == "host" ]]; then
+                set_job_status "$SAMPLE" "Running KneadData (QC)..."
                 # KneadData에 사용할 스레드 수를 계산합니다. (입력된 스레드의 절반, 최소 1개 보장)
                 #KNEADDATA_THREADS=$((THREADS / 2))
                 #if (( KNEADDATA_THREADS < 1 )); then
-                KNEADDATA_THREADS=$((THREADS_PER_JOB / 2))
+                KNEADDATA_THREADS=$((THREADS_PER_JOB / 1.5))
                 if (( KNEADDATA_THREADS < 1 )); then KNEADDATA_THREADS=1; fi
                 #log_info "Allocating ${KNEADDATA_THREADS} threads to KneadData (half of the requested ${THREADS})."
-        
+                
                 decompressed_files=($(decompress_fastq "$SAMPLE" "$R1" "$R2" "$WORK_DIR"))
                 r1_uncompressed="${decompressed_files[0]}"; r2_uncompressed="${decompressed_files[1]}"
             
@@ -272,6 +280,7 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
                 rm "$r1_uncompressed" "$r2_uncompressed"
             
             else # environmental 모드
+                set_job_status "$SAMPLE" "Running fastp (QC)..."
                 run_fastqc "$FASTQC_PRE_QC_DIR" "$THREADS_PER_JOB" "$R1" "$R2"
                 cleaned_files_str=$(run_fastp "$SAMPLE" "$R1" "$R2" "$CLEAN_DIR" "$FASTP_REPORTS_DIR" "$THREADS_PER_JOB" "$FASTP_OPTIONS" "$FASTP_EXTRA_OPTS")
 
@@ -329,12 +338,15 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
         #    log_info "${SAMPLE}: Kraken2 단계가 이미 완료되었습니다. 건너뜁니다."
         #else
         if [ ! -f "$KRAKEN2_SUCCESS_FLAG" ]; then
-            log_info "  [Kraken2 WAIT] $SAMPLE is waiting for lock..."
 
+            set_job_status "$SAMPLE" "Waiting for Kraken2 lock..."
+            
+            log_info "  [Kraken2 WAIT] $SAMPLE is waiting for lock..."
             # [신규 추가] Kraken2 전용 잠금 (순차 실행 보장)
             exec 8>"${LOCK_DIR}/kraken_lock"
             flock 8 # 대기 (Blocking)
             
+            set_job_status "$SAMPLE" "Running Kraken2 (Taxonomy)..."
             log_info "  [Kraken2 START] $SAMPLE (Serial)"
             
             # [수정] Kraken2 실행 (혼자 도니까 전체 $THREADS 사용 가능)
@@ -348,12 +360,16 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
 
         # --- 3. Bracken 및 MPA 변환 단계 ---
         #log_info "${SAMPLE}: Bracken & MPA 변환을 시작합니다."
+        set_job_status "$SAMPLE" "Running Bracken/MPA..."
+
         run_bracken_and_mpa "$SAMPLE" "$final_kraken_report" "$KRAKEN2_DB_ARG" "$BRACKEN_OUT" "$MPA_OUT" "$BRACKEN_READ_LEN" "$BRACKEN_THRESHOLD"
         touch "$BRACKEN_MPA_SUCCESS_FLAG"
         log_info "${SAMPLE}: Bracken & MPA 단계 완료."
     
         log_info "--- [ALL DONE] $SAMPLE ---"
         rm -f "$PROCESSING_FLAG" # 처리 완료 깃발 내리기
+
+        clear_job_status "$SAMPLE"
 
     ) &
 done
