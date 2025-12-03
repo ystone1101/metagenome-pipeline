@@ -206,7 +206,8 @@ while true; do
             QC_RETRY_COUNT=0
         else
             # [실패 시] 카운터 증가
-            ((QC_RETRY_COUNT++))
+            QC_RETRY_COUNT=$((QC_RETRY_COUNT + 1))
+            #((QC_RETRY_COUNT++))
             log_error "QC Pipeline failed (Failure Count: $QC_RETRY_COUNT / $MAX_RETRIES)."
         
             # 2번 연속 실패하면 종료
@@ -259,7 +260,8 @@ while true; do
     if [[ ! -d "$P1_CLEAN_READS_DIR" || -z "$(ls -A "$P1_CLEAN_READS_DIR" 2>/dev/null)" ]]; then
         if [[ -n "$(find "$INPUT_DIR" -maxdepth 1 -type f -name "*.fastq.gz" 2>/dev/null)" ]]; then
             # [수정] 여기도 카운터를 적용합니다!
-            ((VERIFY_RETRY_COUNT++))
+            VERIFY_RETRY_COUNT=$((VERIFY_RETRY_COUNT + 1))
+            #((VERIFY_RETRY_COUNT++))
             
             log_error "CRITICAL: Clean reads directory is empty (Failure Count: $VERIFY_RETRY_COUNT / $MAX_RETRIES)."
             
@@ -374,7 +376,8 @@ while true; do
             fi
 
             # 3. 영구 실패 처리 (기존 로직 유지)
-            ((MAG_RETRY_COUNT++))
+            #((MAG_RETRY_COUNT++))
+            MAG_RETRY_COUNT=$((MAG_RETRY_COUNT + 1))
             log_error "Pipeline 2 failed (Failure Count: $MAG_RETRY_COUNT / $MAX_RETRIES)."
             
             if [ "$MAG_RETRY_COUNT" -gt "$MAX_RETRIES" ]; then

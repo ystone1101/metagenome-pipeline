@@ -198,8 +198,8 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
 
     # printf "\n" >&2; log_info "--- 샘플 '$SAMPLE' 분석 시작 ---"
     
-    #CURRENT_COUNT=$((CURRENT_COUNT + 1))
-    ((CURRENT_COUNT++))
+    CURRENT_COUNT=$((CURRENT_COUNT + 1))
+    #((CURRENT_COUNT++))
     print_progress_bar "$CURRENT_COUNT" "$TOTAL_FILES" "$SAMPLE"
 
     # 각 단계를 위한 성공 플래그 경로를 먼저 정의합니다.
