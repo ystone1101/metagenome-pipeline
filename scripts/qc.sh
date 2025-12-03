@@ -233,7 +233,13 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
     (
         # [수정] 서브쉘 내부 에러 핸들링 강화
         set -euo pipefail
+        cleanup_on_exit() {
+            rm -f "$PROCESSING_FLAG"
+            clear_job_status "$SAMPLE"
+        }
 
+        trap cleanup_on_exit EXIT
+        
         set_job_status "$SAMPLE" "Initializing..."
 
         # --- 1. QC 단계 (KneadData 또는 fastp) ---
