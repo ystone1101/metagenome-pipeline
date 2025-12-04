@@ -4,6 +4,13 @@
 #================================================
 set -euo pipefail
 
+_term_handler() {
+    echo -e "\n\033[0;31m[MASTER] Ctrl+C detected! Killing child processes...\033[0m" >&2
+    pkill -P $$  # 현재 프로세스($$)의 자식들을 모두 죽임 (qc.sh, mag.sh 등)
+    exit 130
+}
+trap _term_handler SIGINT SIGTERM
+
 : "${GTDBTK_DATA_PATH:=}"
 
 FULL_COMMAND_MAG="$0 \"$@\""
