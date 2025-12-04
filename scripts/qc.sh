@@ -226,7 +226,7 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
 
     # [신규 추가] 대기열 관리 (서버 과부하 방지)
     while [ $(jobs -p | wc -l) -ge "$MAX_PENDING_JOBS" ]; do 
-        sleep 2
+        sleep 60
         # 대기 중에도 화면 갱신 (상태 변화 반영)
         print_progress_bar "$CURRENT_COUNT" "$TOTAL_FILES" "Waiting..."
     done
