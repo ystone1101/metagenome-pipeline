@@ -402,7 +402,9 @@ clear_job_status() {
 
 # 4. 대시보드 출력 (메인 스크립트용)
 print_progress_bar() {
-    local current=$1; local total=$2; local sample_name=$3
+    local current=$1
+    local total=$2
+    local sample_name=$3
     
     if [ "$total" -eq 0 ]; then total=1; fi
     local percent=$(( 100 * current / total ))
@@ -416,40 +418,90 @@ print_progress_bar() {
     if [ "$empty_len" -gt 0 ]; then bar_str+="$(printf "%0.s." $(seq 1 $empty_len))"; fi
 
     # --- 화면 출력 ---
-    # 1. 이전 출력이 있었다면 그만큼 커서를 위로 올림
-    local lines_to_clear=${LAST_PRINT_LINES:-0}
-    if [ "$lines_to_clear" -gt 0 ]; then
-        printf "\033[%dA" "$lines_to_clear" >&2
-    fi
+    if [ "$VERBOSE_MODE" = false ]; then
+        local lines_to_clear=${LAST_PRINT_LINES:-0}
+        if [ "$lines_to_clear" -gt 0 ]; then
+            printf "\033[%dA" "$lines_to_clear" >&2
+        fi
 
-    # 2. 메인 진행바 출력 (한 줄)
-    # \033[K : 줄 끝까지 내용 지움 (잔상 제거)
-    printf "\r\033[K [Progress] [%s] %3d%% | Latest: %s\n" "$bar_str" "$percent" "$sample_name" >&2
+        # 메인 헤더
+        printf "\r\033[K [Progress] [%s] %3d%% | Latest: %s\n" "$bar_str" "$percent" "$sample_name" >&2
 
-    # 3. 병렬 작업 상태 출력 (최대 4줄)
-    local line_count=1 # 진행바 1줄 포함
-    
-    if [ -d "$JOB_STATUS_DIR" ]; then
-        # 상태 파일들을 읽어서 정렬 후 출력
-        while IFS= read -r status_line; do
-            if [[ -n "$status_line" ]]; then
-                printf "\033[K%s\n" "$status_line" >&2
+        local line_count=1
+        
+        # 상태 파일 읽기
+        local all_status=""
+        if [ -d "$JOB_STATUS_DIR" ]; then
+            # (파일명 정렬로 읽어옴)
+            all_status=$(find "${JOB_STATUS_DIR}" -maxdepth 1 -name "*.status" -type f -exec cat {} + 2>/dev/null | sort)
+        fi
+
+        # --- 그룹별 출력 도우미 함수 ---
+        print_group() {
+            local title=$1
+            local keyword=$2
+            local color=$3
+            local data=$4
+            
+            # 해당 키워드를 가진 라인만 추출 (grep)
+            local group_lines=$(echo "$data" | grep -i "$keyword" || true)
+            
+            if [[ -n "$group_lines" ]]; then
+                # 그룹 헤더 출력
+                printf "\033[K   ├─ ${color}${title}\033[0m\n" >&2
                 ((line_count++))
+                
+                local count=0
+                local max_show=5 # 그룹당 최대 표시 개수
+                
+                # 라인별 출력
+                while IFS= read -r line; do
+                    if [[ -n "$line" ]]; then
+                        if [ "$count" -lt "$max_show" ]; then
+                            # 기존 "├─ " 제거하고 깔끔하게 다듬기
+                            local clean_line=$(echo "$line" | sed 's/^[[:space:]]*├─ //')
+                            printf "\033[K   │    ├─ %s\n" "$clean_line" >&2
+                            ((line_count++))
+                        fi
+                        ((count++))
+                    fi
+                done <<< "$group_lines"
+                
+                # 남은 개수 표시
+                if [ "$count" -gt "$max_show" ]; then
+                    local remain=$((count - max_show))
+                    printf "\033[K   │    └─ ... %d more samples ...\n" "$remain" >&2
+                    ((line_count++))
+                fi
             fi
-        done < <(find "${JOB_STATUS_DIR}" -maxdepth 1 -name "*.status" -type f -exec cat {} + 2>/dev/null | sort)
+        }
+
+        # --- 그룹 정의 및 출력 ---
+        if [[ -n "$all_status" ]]; then
+            # 1. QC 그룹 (KneadData, fastp, QC slot 대기)
+            # 노란색 헤더 (\033[1;33m)
+            print_group "QC (KneadData/fastp)" "QC" "\033[1;33m" "$all_status"
+
+            # 2. Kraken2 그룹 (Taxonomy, lock 대기)
+            # 파란색 헤더 (\033[1;34m)
+            print_group "Kraken2 (Taxonomy)" "Kraken" "\033[1;34m" "$all_status"
+
+            # 3. Bracken/Annotation 그룹
+            # 보라색 헤더 (\033[1;35m)
+            print_group "Annotation (Bracken/MPA)" "Bracken" "\033[1;35m" "$all_status"
+        fi
+
+        # 화면 울렁거림 방지 (최소 높이 확보)
+        local min_lines=6
+        while [ "$line_count" -lt "$min_lines" ]; do
+            printf "\033[K\n" >&2
+            ((line_count++))
+        done
+
+        export LAST_PRINT_LINES="$line_count"
+    else
+        log_info "--- [${current}/${total}] ${percent}% Processing: ${sample_name} ---"
     fi
     
-    # 4. 화면 흔들림 방지를 위한 빈 줄 채우기 (항상 6줄 확보)
-    # (병렬 작업이 4개 미만일 때도 화면 높이를 고정해서 울렁거림 방지)
-    local min_lines=6
-    while [ "$line_count" -lt "$min_lines" ]; do
-        printf "\033[K\n" >&2
-        ((line_count++))
-    done
-
-    # 5. 이번에 출력한 라인 수 저장 (다음 턴에 지우기 위해)
-    export LAST_PRINT_LINES="$line_count"
-    
-    # 로그 파일에는 간단하게 한 줄만 기록
     echo "[PROGRESS] [${current}/${total}] ${percent}% - Processing: ${sample_name}" >> "$LOG_FILE"
 }

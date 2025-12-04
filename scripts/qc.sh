@@ -159,7 +159,7 @@ log_info "모든 소프트웨어 의존성 확인 완료."
 
 # --- 8. 샘플별 루프 (KneadData 병렬 + Kraken2 순차 하이브리드 적용) ---
 # [설정] 슬롯 개수 정의
-MAX_KNEAD_JOBS=4   # KneadData 동시 실행 수
+MAX_KNEAD_JOBS=2   # KneadData 동시 실행 수
 MAX_KRAKEN_JOBS=1  # Kraken2 동시 실행 수 (메모리 보호)
 MAX_PENDING_JOBS=20 # 대기열 제한 
 
