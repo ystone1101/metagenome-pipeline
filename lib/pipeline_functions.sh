@@ -250,13 +250,13 @@ run_bracken_and_mpa() {
         local bracken_report_file="${bracken_out_dir}/${sample_name}_${level}.breport"
 
         if [[ -f "$bracken_output_file" && -f "$bracken_report_file" ]]; then
-            log_info "  - Level ${level}: 기존 Bracken 결과 발견. 건너뜁니다."
+            echo "[INFO]$(date +'%Y-%m-%d %H:%M:%S') |   - Level ${level}: 기존 Bracken 결과 발견. 건너뜁니다." >> "$LOG_FILE"
             continue
         fi
 
         log_info "  - Level ${level}: 존재비율 재추정 중..."
         conda run -n "$KRAKEN_ENV" bracken -d "$kraken_db" -i "$kraken_report" -r "$read_len" \
-            -l "$level" -t "$threshold" -o "$bracken_output_file" -w "$bracken_report_file"
+            -l "$level" -t "$threshold" -o "$bracken_output_file" -w "$bracken_report_file" >> "$LOG_FILE" 2>&1
     done
     log_info "${sample_name}: Bracken 모든 레벨 실행 완료."
 
@@ -268,12 +268,12 @@ run_bracken_and_mpa() {
         local mpa_percent="${mpa_out_dir}/${sample_name}_percent.mpa"
 
         if [[ -f "$mpa_reads" && -f "$mpa_percent" ]]; then
-            log_info "${sample_name}: 기존 MPA 파일 발견. 변환을 건너뜁니다."
+            echo "[INFO]$(date +'%Y-%m-%d %H:%M:%S') | ${sample_name}: 기존 MPA 파일 발견. 변환을 건너뜁니다." >> "$LOG_FILE"
         else
             log_info "${sample_name}: Bracken 리포트를 MPA 형식으로 변환 중..."
             # --display-header 옵션은 유지하되, 만일을 대비해 후처리
-            conda run -n "$KRAKEN_ENV" kreport2mpa.py -r "$species_report_file" -o "$mpa_reads" --display-header --no-intermediate-ranks
-            conda run -n "$KRAKEN_ENV" kreport2mpa.py -r "$species_report_file" --percentages -o "$mpa_percent" --display-header --no-intermediate-ranks
+            conda run -n "$KRAKEN_ENV" kreport2mpa.py -r "$species_report_file" -o "$mpa_reads" --display-header --no-intermediate-ranks >> "$LOG_FILE" 2>&1
+            conda run -n "$KRAKEN_ENV" kreport2mpa.py -r "$species_report_file" --percentages -o "$mpa_percent" --display-header --no-intermediate-ranks >> "$LOG_FILE" 2>&1
             
             # --- 신규 추가: sed를 이용한 헤더 강제 수정 ---
             log_info "${sample_name}: MPA 파일 헤더를 샘플 이름으로 교정 중..."
