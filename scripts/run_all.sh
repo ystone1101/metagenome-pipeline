@@ -341,6 +341,7 @@ while true; do
         P2_CMD_ARRAY=(
             bash "${PROJECT_ROOT_DIR}/scripts/mag.sh"
             all --input_dir "${P1_CLEAN_READS_DIR}" --output_dir "${P2_OUTPUT_DIR}"
+            --raw_input_dir "${INPUT_DIR}"
             --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}"
             --threads "${THREADS}" --memory_gb "${MEMORY_GB}"
         )

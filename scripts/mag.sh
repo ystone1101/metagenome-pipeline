@@ -546,7 +546,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     MASTER_STATE_FILE="${MAG_BASE_DIR}/../1_microbiome_taxonomy/.pipeline.state"
     
     if [[ -n "$RAW_INPUT_DIR" && -f "$MASTER_STATE_FILE" && -n "${DOKKAEBI_MASTER_COMMAND-}" ]]; then
-        if check_for_new_input_files "$INPUT_DIR_ARG" "$MASTER_STATE_FILE"; then
+        if check_for_new_input_files "$RAW_INPUT_DIR" "$MASTER_STATE_FILE"; then
             : # 변화 없음 (계속 다음 MAG 분석)
         else
             # 99 코드가 반환됨 -> 즉시 루프 중단 후 마스터 스크립트로 신호 전달
