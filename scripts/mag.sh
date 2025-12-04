@@ -376,7 +376,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     if [[ ! -f "$R2_QC_GZ" ]]; then log_warn "Paired QC file for $SAMPLE not found."; continue; fi
 
     # printf "\n" >&2; log_info "--- Processing sample '$SAMPLE' ---"
-    ((CURRENT_PROGRESS++))
+    CURRENT_PROGRESS=$((CURRENT_PROGRESS + 1))
     print_progress_bar "$CURRENT_PROGRESS" "$TOTAL_SAMPLES" "$SAMPLE"    
 
     # 체크포인트 방식을 모두 .success 성공 플래그로 통일

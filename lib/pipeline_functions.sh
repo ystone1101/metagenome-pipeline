@@ -461,9 +461,9 @@ print_progress_bar() {
                             # 기존 "├─ " 제거하고 깔끔하게 다듬기
                             local clean_line=$(echo "$line" | sed 's/^[[:space:]]*├─ //')
                             printf "\033[K   │    ├─ %s\n" "$clean_line" >&2
-                            ((line_count++))
+                            line_count=$((line_count + 1))
                         fi
-                        ((count++))
+                        count=$((count + 1))
                     fi
                 done <<< "$group_lines"
                 
@@ -471,7 +471,7 @@ print_progress_bar() {
                 if [ "$count" -gt "$max_show" ]; then
                     local remain=$((count - max_show))
                     printf "\033[K   │    └─ ... %d more samples ...\n" "$remain" >&2
-                    ((line_count++))
+                    line_count=$((line_count + 1))
                 fi
             fi
         }
@@ -495,7 +495,7 @@ print_progress_bar() {
         local min_lines=6
         while [ "$line_count" -lt "$min_lines" ]; do
             printf "\033[K\n" >&2
-            ((line_count++))
+            line_count=$((line_count + 1))
         done
 
         export LAST_PRINT_LINES="$line_count"
