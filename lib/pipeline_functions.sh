@@ -217,11 +217,27 @@ run_kraken2() {
         log_info "${sample_name}: 기존 Kraken2 결과 발견. 건너뜁니다."
     else
         log_info "${sample_name}: Kraken2 실행 중 (환경: ${KRAKEN_ENV})..."
-        # ✨ [수정] 명령어 마지막에 $extra_opts를 추가합니다. (따옴표 없이)
-        conda run -n "$KRAKEN_ENV" kraken2 \
-            --db "$kraken_db" --threads "$threads" --report "$k2_report" --paired \
-            --report-minimizer-data --minimum-hit-groups 3 "$r1_clean_gz" "$r2_clean_gz" $extra_opts > "$k2_output" 2>> "$LOG_FILE"
+        (
+            # 1. Conda 경로 자동 탐지
+            CONDA_BASE=$(conda info --base)
+            if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
+                source "${CONDA_BASE}/etc/profile.d/conda.sh"
+            else
+                source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh
+            fi
+            
+            # 2. 환경 활성화
+            conda activate "$KRAKEN_ENV"
+            
+            # 3. Kraken2 직접 실행 (로그 파일로 완벽하게 돌림)
+            kraken2 \
+                --db "$kraken_db" --threads "$threads" --report "$k2_report" --paired \
+                --report-minimizer-data --minimum-hit-groups 3 "$r1_clean_gz" "$r2_clean_gz" $extra_opts \
+                > "$k2_output" 2>> "$LOG_FILE"
+        )
+
         log_info "${sample_name}: Kraken2 실행 완료."
+
     fi
     
     log_info "${sample_name}: Kraken2 분류 통계 계산 중..."
@@ -377,128 +393,109 @@ check_for_new_input_files() {
 }
 
 # ==========================================================
-# --- [Pro 3.3] Dashboard Status Monitor Functions ---
+# --- [Pro 3.4] Fixed-Height Dashboard Functions ---
 # ==========================================================
 
-# 1. 상태 보고용 디렉토리 설정 (속도를 위해 /dev/shm 권장)
-if [ -d "/dev/shm" ]; then
-    export JOB_STATUS_DIR="/dev/shm/dokkaebi_status"
-else
-    export JOB_STATUS_DIR="/tmp/dokkaebi_status"
-fi
+# 1. 상태 보고용 디렉토리 설정
+if [ -d "/dev/shm" ]; then export JOB_STATUS_DIR="/dev/shm/dokkaebi_status"; else export JOB_STATUS_DIR="/tmp/dokkaebi_status"; fi
 mkdir -p "$JOB_STATUS_DIR"
 
-# 2. 상태 업데이트 (병렬 작업 내부용)
-set_job_status() {
-    local sample=$1; local status=$2
-    echo "   ├─ [${sample}] ${status}" > "${JOB_STATUS_DIR}/${sample}.status"
-}
+# 2. 상태 업데이트/삭제 함수
+set_job_status() { local sample=$1; local status=$2; echo "   ├─ [${sample}] ${status}" > "${JOB_STATUS_DIR}/${sample}.status"; }
+clear_job_status() { local sample=$1; rm -f "${JOB_STATUS_DIR}/${sample}.status"; }
 
-# 3. 상태 삭제 (작업 완료 시)
-clear_job_status() {
-    local sample=$1
-    rm -f "${JOB_STATUS_DIR}/${sample}.status"
-}
-
-# 4. 대시보드 출력 (메인 스크립트용)
+# 3. [핵심] 고정 높이 대시보드 출력 함수
 print_progress_bar() {
-    local current=$1
-    local total=$2
-    local sample_name=$3
+    local current=$1; local total=$2; local sample_name=$3
     
     if [ "$total" -eq 0 ]; then total=1; fi
     local percent=$(( 100 * current / total ))
-    local bar_len=40
-    local filled_len=$(( percent * bar_len / 100 ))
-    local empty_len=$(( bar_len - filled_len ))
+    
+    # 터미널 너비 감지
+    local term_width=$(tput cols 2>/dev/null || echo 80)
+    local bar_len=$(( term_width * 40 / 100 )); if [ "$bar_len" -lt 10 ]; then bar_len=10; fi
+    local filled_len=$(( percent * bar_len / 100 )); local empty_len=$(( bar_len - filled_len ))
+    
+    # Bar Design (White Block)
+    local bar_str=""; if [ "$filled_len" -gt 0 ]; then bar_str+="\033[47m$(printf "%0.s " $(seq 1 $filled_len))\033[0m"; fi
+    if [ "$empty_len" -gt 0 ]; then bar_str+="\033[90m$(printf "%0.s·" $(seq 1 $empty_len))\033[0m"; fi
 
-    # --- Bar Design ---
-    local bar_str=""
-    if [ "$filled_len" -gt 0 ]; then bar_str+="$(printf "%0.s#" $(seq 1 $filled_len))"; fi
-    if [ "$empty_len" -gt 0 ]; then bar_str+="$(printf "%0.s." $(seq 1 $empty_len))"; fi
-
-    # --- 화면 출력 ---
     if [ "$VERBOSE_MODE" = false ]; then
-        local lines_to_clear=${LAST_PRINT_LINES:-0}
-        if [ "$lines_to_clear" -gt 0 ]; then
-            printf "\033[%dA" "$lines_to_clear" >&2
-        fi
-
-        # 메인 헤더
-        printf "\r\033[K [Progress] [%s] %3d%% | Latest: %s\n" "$bar_str" "$percent" "$sample_name" >&2
-
-        local line_count=1
+        # --- [설정] 그룹별 표시 줄 수 (높이 고정) ---
+        local QC_LIMIT=5
+        local KRAKEN_LIMIT=3
+        local BRACKEN_LIMIT=3
         
-        # 상태 파일 읽기
+        # 전체 대시보드 높이 계산: 헤더(1) + (그룹헤더(1)+본문)*3 = 총 15줄
+        local TOTAL_HEIGHT=$(( 1 + (1 + QC_LIMIT) + (1 + KRAKEN_LIMIT) + (1 + BRACKEN_LIMIT) ))
+        
+        # 1. 커서 이동: 처음이 아니면 고정 높이만큼 위로 이동
+        local lines_to_clear=${LAST_PRINT_LINES:-0}
+        if [ "$lines_to_clear" -gt 0 ]; then printf "\033[%dA" "$TOTAL_HEIGHT" >&2; fi
+        
+        # 2. 메인 헤더 출력
+        printf "\r\033[K [Progress] [%b] %3d%% | Latest: %s\n" "$bar_str" "$percent" "$sample_name" >&2
+
+        # 3. 상태 파일 읽기
         local all_status=""
         if [ -d "$JOB_STATUS_DIR" ]; then
-            # (파일명 정렬로 읽어옴)
             all_status=$(find "${JOB_STATUS_DIR}" -maxdepth 1 -name "*.status" -type f -exec cat {} + 2>/dev/null | sort)
         fi
 
-        # --- 그룹별 출력 도우미 함수 ---
-        print_group() {
-            local title=$1
-            local keyword=$2
-            local color=$3
-            local data=$4
+        # --- [내부 함수] 고정 높이 출력기 ---
+        print_fixed_group() {
+            local title=$1; local keyword=$2; local color=$3; local limit=$4; local data=$5
             
-            # 해당 키워드를 가진 라인만 추출 (grep)
+            # 그룹 헤더 출력
+            printf "\033[K   ├─ ${color}${title}\033[0m\n" >&2
+            
+            # 데이터 필터링 및 정렬 (Running 우선)
             local group_lines=$(echo "$data" | grep -i "$keyword" || true)
+            local running_lines=$(echo "$group_lines" | grep "Running" | sort)
+            local other_lines=$(echo "$group_lines" | grep -v "Running" | sort)
+            local sorted_data="${running_lines}${running_lines:+$'\n'}${other_lines}"
             
+            # 라인 카운팅
+            local count=0
+            local printed_lines=0
+            
+            # 데이터가 없으면 sorted_data가 빈 줄 하나를 가질 수 있으므로 체크
             if [[ -n "$group_lines" ]]; then
-                # 그룹 헤더 출력
-                printf "\033[K   ├─ ${color}${title}\033[0m\n" >&2
-                ((line_count++))
+                local total_items=$(echo "$group_lines" | wc -l)
                 
-                local count=0
-                local max_show=5 # 그룹당 최대 표시 개수
-                
-                # 라인별 출력
                 while IFS= read -r line; do
-                    if [[ -n "$line" ]]; then
-                        if [ "$count" -lt "$max_show" ]; then
-                            # 기존 "├─ " 제거하고 깔끔하게 다듬기
+                    [[ -z "$line" ]] && continue
+                    
+                    if [ "$printed_lines" -lt "$limit" ]; then
+                        # 마지막 줄인데 남은 게 더 많다면 "... more" 출력
+                        if [ "$printed_lines" -eq $((limit - 1)) ] && [ "$total_items" -gt "$limit" ]; then
+                            local remain=$((total_items - printed_lines))
+                            printf "\033[K   │    └─ ... %d more samples ...\n" "$remain" >&2
+                        else
+                            # 일반 출력 (너비 잘림 적용)
                             local clean_line=$(echo "$line" | sed 's/^[[:space:]]*├─ //')
-                            printf "\033[K   │    ├─ %s\n" "$clean_line" >&2
-                            line_count=$((line_count + 1))
+                            local display_str="   │    ├─ ${clean_line}"
+                            printf "\033[K%s\n" "${display_str:0:$((term_width - 1))}" >&2
                         fi
-                        count=$((count + 1))
+                        printed_lines=$((printed_lines + 1))
                     fi
-                done <<< "$group_lines"
-                
-                # 남은 개수 표시
-                if [ "$count" -gt "$max_show" ]; then
-                    local remain=$((count - max_show))
-                    printf "\033[K   │    └─ ... %d more samples ...\n" "$remain" >&2
-                    line_count=$((line_count + 1))
-                fi
+                    count=$((count + 1))
+                done <<< "$sorted_data"
             fi
+            
+            # 남은 빈 줄 채우기 (Padding) -> 화면 고정의 핵심!
+            while [ "$printed_lines" -lt "$limit" ]; do
+                printf "\033[K\n" >&2
+                printed_lines=$((printed_lines + 1))
+            done
         }
 
-        # --- 그룹 정의 및 출력 ---
-        if [[ -n "$all_status" ]]; then
-            # 1. QC 그룹 (KneadData, fastp, QC slot 대기)
-            # 노란색 헤더 (\033[1;33m)
-            print_group "QC (KneadData/fastp)" "QC" "\033[1;33m" "$all_status"
+        # --- 그룹별 출력 (고정 높이 적용) ---
+        print_fixed_group "QC (KneadData/fastp)" "QC" "\033[1;33m" "$QC_LIMIT" "$all_status"
+        print_fixed_group "Kraken2 (Taxonomy)" "Kraken" "\033[1;34m" "$KRAKEN_LIMIT" "$all_status"
+        print_fixed_group "Annotation (Bracken/MPA)" "Bracken" "\033[1;35m" "$BRACKEN_LIMIT" "$all_status"
 
-            # 2. Kraken2 그룹 (Taxonomy, lock 대기)
-            # 파란색 헤더 (\033[1;34m)
-            print_group "Kraken2 (Taxonomy)" "Kraken" "\033[1;34m" "$all_status"
-
-            # 3. Bracken/Annotation 그룹
-            # 보라색 헤더 (\033[1;35m)
-            print_group "Annotation (Bracken/MPA)" "Bracken" "\033[1;35m" "$all_status"
-        fi
-
-        # 화면 울렁거림 방지 (최소 높이 확보)
-        local min_lines=6
-        while [ "$line_count" -lt "$min_lines" ]; do
-            printf "\033[K\n" >&2
-            line_count=$((line_count + 1))
-        done
-
-        export LAST_PRINT_LINES="$line_count"
+        export LAST_PRINT_LINES="$TOTAL_HEIGHT"
     else
         log_info "--- [${current}/${total}] ${percent}% Processing: ${sample_name} ---"
     fi

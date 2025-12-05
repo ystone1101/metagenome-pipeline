@@ -4,36 +4,23 @@
 #================================================
 set -euo pipefail
 
+# [scripts/qc.sh 와 scripts/mag.sh 상단에 넣을 코드]
 _term_handler() {
-    # 1. [핵심] 중복 실행 방지: 트랩을 해제하여 연쇄 호출을 막습니다.
+    # 1. 마스터(run_all.sh)가 실행한 경우 -> 조용히 종료 (마스터가 알아서 다 죽여줌)
+    if [[ -n "${DOKKAEBI_MASTER_COMMAND:-}" ]]; then
+        exit 130
+    fi
+
+    # 2. 단독으로 실행한 경우 -> 내가 책임지고 청소 (메시지 출력)
     trap - SIGINT SIGTERM
-
-    # 2. 메시지는 딱 한 번만 출력 (마스터이거나, 터미널 제어권이 있을 때만)
-    if [ -t 2 ]; then
-        echo -e "\n\033[0;31m[ABORT] Ctrl+C detected! Force killing all processes...\033[0m" >&2
-    fi
-
-    # 3. [핵심] 자식 프로세스들은 '경고 없이' 즉시 종료 (SIGKILL -9)
-    # (SIGTERM을 쓰면 자식들도 trap이 발동해서 메시지가 폭주함)
-    
-    # 내 자식들 죽이기
+    echo -e "\n\033[0;31m[SUB-PROCESS] Ctrl+C detected! Killing local jobs...\033[0m" >&2
     pkill -9 -P $$ 2>/dev/null || true
-
-    # 분석 툴 이름으로 검색해서 확인 사살
-    TOOLS_TO_KILL=("qc.sh" "mag.sh" "kneaddata" "fastp" "kraken2" "bracken" "megahit" "metawrap" "gtdbtk" "bakta" "diamond" "perl" "pigz" "java" "python")
     
-    for tool in "${TOOLS_TO_KILL[@]}"; do
-        pkill -9 -u "$(whoami)" -f "$tool" 2>/dev/null || true
-    done
-
-    # 상태 파일 정리
-    if [ -n "${OUTPUT_DIR:-}" ]; then
-        find "$OUTPUT_DIR" -name "*.processing" -delete 2>/dev/null || true
-    fi
+    # (단독 실행 시에도 분석 툴 정리가 필요하다면 아래 내용 추가 가능)
+    # pkill -9 -u "$(whoami)" -f "kneaddata" ... (필요시)
     
     exit 130
 }
-# SIGINT(Ctrl+C), SIGTERM을 받으면 실행
 trap _term_handler SIGINT SIGTERM
 
 : "${GTDBTK_DATA_PATH:=}"

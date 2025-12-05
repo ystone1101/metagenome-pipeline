@@ -4,24 +4,18 @@
 #================================================
 set -euo pipefail
 
+# [scripts/run_all.sh 상단에 넣을 코드]
 _term_handler() {
-    # 1. [핵심] 중복 실행 방지: 트랩을 해제하여 연쇄 호출을 막습니다.
-    trap - SIGINT SIGTERM
-
-    # 2. 메시지는 딱 한 번만 출력 (마스터이거나, 터미널 제어권이 있을 때만)
+    trap - SIGINT SIGTERM # 중복 호출 방지
     if [ -t 2 ]; then
         echo -e "\n\033[0;31m[ABORT] Ctrl+C detected! Force killing all processes...\033[0m" >&2
     fi
 
-    # 3. [핵심] 자식 프로세스들은 '경고 없이' 즉시 종료 (SIGKILL -9)
-    # (SIGTERM을 쓰면 자식들도 trap이 발동해서 메시지가 폭주함)
-    
-    # 내 자식들 죽이기
+    # 자식 프로세스 즉시 사살
     pkill -9 -P $$ 2>/dev/null || true
 
-    # 분석 툴 이름으로 검색해서 확인 사살
+    # 분석 툴 확인 사살
     TOOLS_TO_KILL=("qc.sh" "mag.sh" "kneaddata" "fastp" "kraken2" "bracken" "megahit" "metawrap" "gtdbtk" "bakta" "diamond" "perl" "pigz" "java" "python")
-    
     for tool in "${TOOLS_TO_KILL[@]}"; do
         pkill -9 -u "$(whoami)" -f "$tool" 2>/dev/null || true
     done
@@ -30,12 +24,9 @@ _term_handler() {
     if [ -n "${OUTPUT_DIR:-}" ]; then
         find "$OUTPUT_DIR" -name "*.processing" -delete 2>/dev/null || true
     fi
-    
     exit 130
 }
-# SIGINT(Ctrl+C), SIGTERM을 받으면 실행
 trap _term_handler SIGINT SIGTERM
-
 FULL_COMMAND_RUN_ALL="$0 \"$@\""
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
