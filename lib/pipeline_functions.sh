@@ -220,7 +220,7 @@ run_kraken2() {
         # ✨ [수정] 명령어 마지막에 $extra_opts를 추가합니다. (따옴표 없이)
         conda run -n "$KRAKEN_ENV" kraken2 \
             --db "$kraken_db" --threads "$threads" --report "$k2_report" --paired \
-            --report-minimizer-data --minimum-hit-groups 3 "$r1_clean_gz" "$r2_clean_gz" $extra_opts > "$k2_output"
+            --report-minimizer-data --minimum-hit-groups 3 "$r1_clean_gz" "$r2_clean_gz" $extra_opts > "$k2_output" 2>> "$LOG_FILE"
         log_info "${sample_name}: Kraken2 실행 완료."
     fi
     

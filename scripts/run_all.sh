@@ -5,30 +5,35 @@
 set -euo pipefail
 
 _term_handler() {
-    echo -e "\n\033[0;31m[ABORT] Ctrl+C detected! Force killing ALL pipeline processes...\033[0m" >&2
+    # 1. [핵심] 중복 실행 방지: 트랩을 해제하여 연쇄 호출을 막습니다.
+    trap - SIGINT SIGTERM
 
-    # 1. 하위 스크립트 종료
-    pkill -P $$ 2>/dev/null || true
+    # 2. 메시지는 딱 한 번만 출력 (마스터이거나, 터미널 제어권이 있을 때만)
+    if [ -t 2 ]; then
+        echo -e "\n\033[0;31m[ABORT] Ctrl+C detected! Force killing all processes...\033[0m" >&2
+    fi
 
-    # 2. [핵심] 분석 툴 프로세스 명시적 종료 (가장 확실한 방법)
-    # 파이프라인이 사용하는 모든 무거운 툴들을 리스트업해서 죽입니다.
+    # 3. [핵심] 자식 프로세스들은 '경고 없이' 즉시 종료 (SIGKILL -9)
+    # (SIGTERM을 쓰면 자식들도 trap이 발동해서 메시지가 폭주함)
+    
+    # 내 자식들 죽이기
+    pkill -9 -P $$ 2>/dev/null || true
+
+    # 분석 툴 이름으로 검색해서 확인 사살
     TOOLS_TO_KILL=("qc.sh" "mag.sh" "kneaddata" "fastp" "kraken2" "bracken" "megahit" "metawrap" "gtdbtk" "bakta" "diamond" "perl" "pigz" "java" "python")
     
     for tool in "${TOOLS_TO_KILL[@]}"; do
-        pkill -u "$(whoami)" -f "$tool" 2>/dev/null || true
+        pkill -9 -u "$(whoami)" -f "$tool" 2>/dev/null || true
     done
 
-    # 3. 상태 파일 정리 (Processing 깃발 제거)
-    # (중단된 작업이 '처리 중'으로 남지 않도록 삭제)
+    # 상태 파일 정리
     if [ -n "${OUTPUT_DIR:-}" ]; then
         find "$OUTPUT_DIR" -name "*.processing" -delete 2>/dev/null || true
     fi
     
-    echo -e "\033[0;31m[ABORT] All processes terminated. Cleanup complete.\033[0m" >&2
     exit 130
 }
-
-# SIGINT(Ctrl+C), SIGTERM(kill 명령)을 받으면 위 함수 실행
+# SIGINT(Ctrl+C), SIGTERM을 받으면 실행
 trap _term_handler SIGINT SIGTERM
 
 FULL_COMMAND_RUN_ALL="$0 \"$@\""

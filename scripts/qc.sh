@@ -5,10 +5,35 @@
 set -euo pipefail
 
 _term_handler() {
-    echo -e "\n\033[0;31m[MASTER] Ctrl+C detected! Killing child processes...\033[0m" >&2
-    pkill -P $$  # 현재 프로세스($$)의 자식들을 모두 죽임 (qc.sh, mag.sh 등)
+    # 1. [핵심] 중복 실행 방지: 트랩을 해제하여 연쇄 호출을 막습니다.
+    trap - SIGINT SIGTERM
+
+    # 2. 메시지는 딱 한 번만 출력 (마스터이거나, 터미널 제어권이 있을 때만)
+    if [ -t 2 ]; then
+        echo -e "\n\033[0;31m[ABORT] Ctrl+C detected! Force killing all processes...\033[0m" >&2
+    fi
+
+    # 3. [핵심] 자식 프로세스들은 '경고 없이' 즉시 종료 (SIGKILL -9)
+    # (SIGTERM을 쓰면 자식들도 trap이 발동해서 메시지가 폭주함)
+    
+    # 내 자식들 죽이기
+    pkill -9 -P $$ 2>/dev/null || true
+
+    # 분석 툴 이름으로 검색해서 확인 사살
+    TOOLS_TO_KILL=("qc.sh" "mag.sh" "kneaddata" "fastp" "kraken2" "bracken" "megahit" "metawrap" "gtdbtk" "bakta" "diamond" "perl" "pigz" "java" "python")
+    
+    for tool in "${TOOLS_TO_KILL[@]}"; do
+        pkill -9 -u "$(whoami)" -f "$tool" 2>/dev/null || true
+    done
+
+    # 상태 파일 정리
+    if [ -n "${OUTPUT_DIR:-}" ]; then
+        find "$OUTPUT_DIR" -name "*.processing" -delete 2>/dev/null || true
+    fi
+    
     exit 130
 }
+# SIGINT(Ctrl+C), SIGTERM을 받으면 실행
 trap _term_handler SIGINT SIGTERM
 
 FULL_COMMAND_QC="$0 \"$@\""
