@@ -392,51 +392,60 @@ check_for_new_input_files() {
     fi
 }
 
-# ==========================================================
-# --- [Pro 3.4] Dashboard Functions (Final Optimized) ---
-# ==========================================================
-
-if [ -d "/dev/shm" ]; then export JOB_STATUS_DIR="/dev/shm/dokkaebi_status"; else export JOB_STATUS_DIR="/tmp/dokkaebi_status"; fi
-mkdir -p "$JOB_STATUS_DIR"
-
-set_job_status() { local sample=$1; local status=$2; echo "   ├─ [${sample}] ${status}" > "${JOB_STATUS_DIR}/${sample}.status"; }
-clear_job_status() { local sample=$1; rm -f "${JOB_STATUS_DIR}/${sample}.status"; }
-
 print_progress_bar() {
-    local current=$1; local total=$2; local sample_name=$3
+    local current=$1
+    local total=$2
+    local sample_name=$3
+    
     if [ "$total" -eq 0 ]; then total=1; fi
     local percent=$(( 100 * current / total ))
+    
     local term_width=$(tput cols 2>/dev/null || echo 80)
     local bar_len=$(( term_width * 40 / 100 )); if [ "$bar_len" -lt 10 ]; then bar_len=10; fi
     local filled_len=$(( percent * bar_len / 100 )); local empty_len=$(( bar_len - filled_len ))
+
     local bar_str=""; if [ "$filled_len" -gt 0 ]; then bar_str+="\033[47m$(printf "%0.s " $(seq 1 $filled_len))\033[0m"; fi
     if [ "$empty_len" -gt 0 ]; then bar_str+="\033[90m$(printf "%0.s·" $(seq 1 $empty_len))\033[0m"; fi
 
     if [ "$VERBOSE_MODE" = false ]; then
-        # [설정] 그룹별 줄 수 제한
-        local LIMIT_QC=5; local LIMIT_TAXA=3; local LIMIT_ASSEMBLY=3; local LIMIT_BINNING=2; local LIMIT_ANNO=2
+        # ▼▼▼ [복구 완료] 파트너님의 5단계 설정 ▼▼▼
+        local LIMIT_QC=5
+        local LIMIT_TAXA=3
+        local LIMIT_ASSEMBLY=3
+        local LIMIT_BINNING=2
+        local LIMIT_ANNO=2
+        
+        # 전체 높이 계산
         local TOTAL_HEIGHT=$(( 1 + (1 + LIMIT_QC) + (1 + LIMIT_TAXA) + (1 + LIMIT_ASSEMBLY) + (1 + LIMIT_BINNING) + (1 + LIMIT_ANNO) ))
+        # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         
         local lines_to_clear=${LAST_PRINT_LINES:-0}
         if [ "$lines_to_clear" -gt 0 ]; then printf "\033[%dA" "$lines_to_clear" >&2; fi
         printf "\033[0J" >&2
-        
-        printf "\r [Progress] [%b] %3d%% | Latest: %s\n" "$bar_str" "$percent" "$sample_name" >&2
-        
+
+        printf "\r [Progress] [%s] %3d%% | Latest: %s\n" "$bar_str" "$percent" "$sample_name" >&2
+
         local line_count=1
         local all_status=""
         if [ -d "$JOB_STATUS_DIR" ]; then
             all_status=$(find "${JOB_STATUS_DIR}" -maxdepth 1 -name "*.status" -type f -exec cat {} + 2>/dev/null | sort)
         fi
 
-        print_group() {
+        # --- 내부 함수: 고정 높이 출력기 ---
+        print_fixed_group() {
             local title=$1; local keyword=$2; local color=$3; local limit=$4; local data=$5
+            
+            printf "   ├─ ${color}${title}\033[0m\n" >&2
+            line_count=$((line_count + 1))
+            
+            local count=0; local printed=0
             local group_lines=$(echo "$data" | grep -Ei "$keyword" || true)
+            
             if [[ -n "$group_lines" ]]; then
-                printf "   ├─ ${color}${title}\033[0m\n" >&2; line_count=$((line_count + 1))
-                local count=0; local printed=0
-                local sorted_lines=$(echo "$group_lines" | grep "Running" | sort); local other_lines=$(echo "$group_lines" | grep -v "Running" | sort)
+                local sorted_lines=$(echo "$group_lines" | grep "Running" | sort)
+                local other_lines=$(echo "$group_lines" | grep -v "Running" | sort)
                 local final_lines="${sorted_lines}${sorted_lines:+$'\n'}${other_lines}"
+                
                 while IFS= read -r line; do
                     [[ -z "$line" ]] && continue
                     if [ "$printed" -lt "$limit" ]; then
@@ -451,21 +460,29 @@ print_progress_bar() {
                     fi
                     count=$((count + 1))
                 done <<< "$final_lines"
-                while [ "$printed" -lt "$limit" ]; do printf "\n" >&2; printed=$((printed + 1)); done
-                line_count=$((line_count + printed))
             fi
+            
+            # 빈 줄 채우기 (Padding)
+            while [ "$printed" -lt "$limit" ]; do 
+                printf "\033[K\n" >&2
+                printed=$((printed + 1))
+                line_count=$((line_count + 1))
+            done
         }
 
+        # ▼▼▼ [복구 완료] 파트너님의 5단계 그룹 출력 ▼▼▼
         if [[ -n "$all_status" ]]; then
-            print_group "Preprocessing (QC)" "QC|Repair" "\033[1;33m" "$LIMIT_QC" "$all_status"
-            print_group "Taxonomy (Read-based)" "Kraken|Bracken" "\033[1;34m" "$LIMIT_TAXA" "$all_status"
-            print_group "MAG - Assembly" "Assembly" "\033[1;36m" "$LIMIT_ASSEMBLY" "$all_status"
-            print_group "MAG - Binning" "Binning" "\033[1;32m" "$LIMIT_BINNING" "$all_status"
-            print_group "MAG - Annotation (GTDB/Bakta)" "GTDB|Bakta" "\033[1;35m" "$LIMIT_ANNO" "$all_status"
+            print_fixed_group "Preprocessing (QC)" "QC|Repair" "\033[1;33m" "$LIMIT_QC" "$all_status"
+            print_fixed_group "Taxonomy (Read-based)" "Kraken|Bracken" "\033[1;34m" "$LIMIT_TAXA" "$all_status"
+            print_fixed_group "MAG - Assembly" "Assembly" "\033[1;36m" "$LIMIT_ASSEMBLY" "$all_status"
+            print_fixed_group "MAG - Binning" "Binning" "\033[1;32m" "$LIMIT_BINNING" "$all_status"
+            print_fixed_group "MAG - Annotation (GTDB/Bakta)" "GTDB|Bakta" "\033[1;35m" "$LIMIT_ANNO" "$all_status"
         fi
-        
+        # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
         local min_total_lines=10
         while [ "$line_count" -lt "$min_total_lines" ]; do printf "\n" >&2; line_count=$((line_count + 1)); done
+        
         export LAST_PRINT_LINES="$line_count"
     else
         log_info "--- [${current}/${total}] ${percent}% Processing: ${sample_name} ---"
