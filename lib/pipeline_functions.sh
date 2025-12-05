@@ -326,76 +326,14 @@ merge_bracken_outputs() {
 }
 
 # ==========================================================
-# --- Get R2 Pair Path Function (Shared Logic) ---
-# 설명: R1 파일 경로를 입력받아 해당하는 R2 파일 경로를 추정하여 반환합니다.
+# --- [Pro 3.5] Fixed-Height Dashboard (5-Group Version) ---
 # ==========================================================
-get_r2_path() {
-    local r1_path=$1
-    local r1_base=$(basename "$r1_path")
-    local r1_dir=$(dirname "$r1_path")
-    
-    # BASH 정규식 매칭을 사용하여 안전하게 R2 파일명 구성
-    # 패턴: (Prefix)(Tag: _R1, _1, .R1, .1)(Suffix)
-    if [[ "$r1_base" =~ ^(.*)(_R?1|_1|\.R1|\.1)(.*)\.fastq\.gz$ ]]; then
-        local prefix="${BASH_REMATCH[1]}"
-        local clean_tag="${BASH_REMATCH[2]}"
-        local suffix="${BASH_REMATCH[3]}"
-        
-        # tag 치환: 1 -> 2, R1 -> R2
-        CLEAN_TAG="${clean_tag/R1/R2}"
-        CLEAN_TAG="${CLEAN_TAG/r1/r2}"
-        CLEAN_TAG="${CLEAN_TAG/_1/_2}"
-        CLEAN_TAG="${CLEAN_TAG/.1/.2}"
 
-        echo "${r1_dir}/${prefix}${CLEAN_TAG}${suffix}.fastq.gz"
-        return 0
-    else
-        # 패턴 불일치 시 오류 코드 반환
-        return 1
-    fi
-}
-
-# --- Check for New Input Files (Used by MAG to break early) ---
-# 설명: mag.sh 내부에서 run_all.sh의 상태 파일을 읽어 변경 감지
-check_for_new_input_files() {
-    local raw_dir=$1
-    local state_file=$2
-    
-    local CURRENT_STATE_FILE=$(mktemp)
-    
-    # [stat 감지] 현재 입력 폴더의 상태를 빠르게 기록
-    if [[ -n "$(find "$raw_dir" -maxdepth 1 -type f -name "*.fastq.gz" 2>/dev/null)" ]]; then
-        find "$raw_dir" -maxdepth 1 -type f -name "*.fastq.gz" -printf "%f\t%s\t%T@\n" | sort > "$CURRENT_STATE_FILE"
-    else
-        touch "$CURRENT_STATE_FILE"
-    fi
-
-    # [비교] 이전 상태와 현재 상태 비교
-    if [ -f "$state_file" ] && diff -q "$state_file" "$CURRENT_STATE_FILE" >/dev/null; then
-        # 변화 없음
-        rm -f "$CURRENT_STATE_FILE"
-        return 0
-    else
-        sleep 5
-        local STABILITY_CHECK_FILE=$(mktemp)
-        find "$raw_dir" -maxdepth 1 -type f -name "*.fastq.gz" -printf "%f\t%s\t%T@\n" | sort > "$STABILITY_CHECK_FILE"
-
-        if diff -q "$CURRENT_STATE_FILE" "$STABILITY_CHECK_FILE" >/dev/null; then
-            # 5초 전과 후가 동일함 -> 전송 완료됨 -> 진짜 변화!
-            rm -f "$CURRENT_STATE_FILE" "$STABILITY_CHECK_FILE"
-            return 99 # 신호 발생
-        else
-            # 5초 사이에 또 변함 -> 아직 전송 중임 -> 이번 턴은 무시하고 대기
-            rm -f "$CURRENT_STATE_FILE" "$STABILITY_CHECK_FILE"
-            return 0 # 아직 준비 안 됨 (변화 없음으로 처리)
-        fi
-    fi
-}
+set_job_status() { local sample=$1; local status=$2; echo "   ├─ [${sample}] ${status}" > "${JOB_STATUS_DIR}/${sample}.status"; }
+clear_job_status() { local sample=$1; rm -f "${JOB_STATUS_DIR}/${sample}.status"; }
 
 print_progress_bar() {
-    local current=$1
-    local total=$2
-    local sample_name=$3
+    local current=$1; local total=$2; local sample_name=$3
     
     if [ "$total" -eq 0 ]; then total=1; fi
     local percent=$(( 100 * current / total ))
@@ -403,38 +341,38 @@ print_progress_bar() {
     local term_width=$(tput cols 2>/dev/null || echo 80)
     local bar_len=$(( term_width * 40 / 100 )); if [ "$bar_len" -lt 10 ]; then bar_len=10; fi
     local filled_len=$(( percent * bar_len / 100 )); local empty_len=$(( bar_len - filled_len ))
-
+    
+    # [디자인 복구] White Solid Bar
     local bar_str=""; if [ "$filled_len" -gt 0 ]; then bar_str+="\033[47m$(printf "%0.s " $(seq 1 $filled_len))\033[0m"; fi
     if [ "$empty_len" -gt 0 ]; then bar_str+="\033[90m$(printf "%0.s·" $(seq 1 $empty_len))\033[0m"; fi
 
     if [ "$VERBOSE_MODE" = false ]; then
-        # ▼▼▼ [복구 완료] 파트너님의 5단계 설정 ▼▼▼
+        # [복구] 5개 그룹 설정 (파트너님 요청 사항)
         local LIMIT_QC=5
         local LIMIT_TAXA=3
         local LIMIT_ASSEMBLY=3
         local LIMIT_BINNING=2
         local LIMIT_ANNO=2
         
-        # 전체 높이 계산
         local TOTAL_HEIGHT=$(( 1 + (1 + LIMIT_QC) + (1 + LIMIT_TAXA) + (1 + LIMIT_ASSEMBLY) + (1 + LIMIT_BINNING) + (1 + LIMIT_ANNO) ))
-        # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         
         local lines_to_clear=${LAST_PRINT_LINES:-0}
         if [ "$lines_to_clear" -gt 0 ]; then printf "\033[%dA" "$lines_to_clear" >&2; fi
-        printf "\033[0J" >&2
-
-        printf "\r [Progress] [%s] %3d%% | Latest: %s\n" "$bar_str" "$percent" "$sample_name" >&2
-
+        printf "\033[0J" >&2 # 화면 클리어
+        
+        printf "\r [Progress] [%b] %3d%% | Latest: %s\n" "$bar_str" "$percent" "$sample_name" >&2
+        
         local line_count=1
         local all_status=""
         if [ -d "$JOB_STATUS_DIR" ]; then
             all_status=$(find "${JOB_STATUS_DIR}" -maxdepth 1 -name "*.status" -type f -exec cat {} + 2>/dev/null | sort)
         fi
 
-        # --- 내부 함수: 고정 높이 출력기 ---
+        # --- 고정 높이 출력 헬퍼 ---
         print_fixed_group() {
             local title=$1; local keyword=$2; local color=$3; local limit=$4; local data=$5
             
+            # 헤더 출력
             printf "   ├─ ${color}${title}\033[0m\n" >&2
             line_count=$((line_count + 1))
             
@@ -442,9 +380,10 @@ print_progress_bar() {
             local group_lines=$(echo "$data" | grep -Ei "$keyword" || true)
             
             if [[ -n "$group_lines" ]]; then
-                local sorted_lines=$(echo "$group_lines" | grep "Running" | sort)
+                # [복구] Running 우선 정렬
+                local running_lines=$(echo "$group_lines" | grep "Running" | sort)
                 local other_lines=$(echo "$group_lines" | grep -v "Running" | sort)
-                local final_lines="${sorted_lines}${sorted_lines:+$'\n'}${other_lines}"
+                local final_lines="${running_lines}${running_lines:+$'\n'}${other_lines}"
                 
                 while IFS= read -r line; do
                     [[ -z "$line" ]] && continue
@@ -454,6 +393,7 @@ print_progress_bar() {
                             printf "   │    └─ ... %d more ...\n" "$remain" >&2
                         else
                             local clean_line=$(echo "$line" | sed 's/^[[:space:]]*├─ //')
+                            # 너비 제한
                             printf "   │    ├─ %s\n" "${clean_line:0:$((term_width - 10))}" >&2
                         fi
                         printed=$((printed + 1))
@@ -462,30 +402,34 @@ print_progress_bar() {
                 done <<< "$final_lines"
             fi
             
-            # 빈 줄 채우기 (Padding)
+            # [복구] 빈 줄 채우기 (높이 고정)
             while [ "$printed" -lt "$limit" ]; do 
-                printf "\033[K\n" >&2
+                printf "\n" >&2
                 printed=$((printed + 1))
                 line_count=$((line_count + 1))
             done
         }
 
-        # ▼▼▼ [복구 완료] 파트너님의 5단계 그룹 출력 ▼▼▼
+        # [복구] 5개 그룹 출력 호출
         if [[ -n "$all_status" ]]; then
             print_fixed_group "Preprocessing (QC)" "QC|Repair" "\033[1;33m" "$LIMIT_QC" "$all_status"
             print_fixed_group "Taxonomy (Read-based)" "Kraken|Bracken" "\033[1;34m" "$LIMIT_TAXA" "$all_status"
             print_fixed_group "MAG - Assembly" "Assembly" "\033[1;36m" "$LIMIT_ASSEMBLY" "$all_status"
             print_fixed_group "MAG - Binning" "Binning" "\033[1;32m" "$LIMIT_BINNING" "$all_status"
             print_fixed_group "MAG - Annotation (GTDB/Bakta)" "GTDB|Bakta" "\033[1;35m" "$LIMIT_ANNO" "$all_status"
+        else
+             # 상태 파일이 아직 없을 때도 빈 틀 유지
+            print_fixed_group "Preprocessing (QC)" "QC|Repair" "\033[1;33m" "$LIMIT_QC" ""
+            print_fixed_group "Taxonomy (Read-based)" "Kraken|Bracken" "\033[1;34m" "$LIMIT_TAXA" ""
+            print_fixed_group "MAG - Assembly" "Assembly" "\033[1;36m" "$LIMIT_ASSEMBLY" ""
+            print_fixed_group "MAG - Binning" "Binning" "\033[1;32m" "$LIMIT_BINNING" ""
+            print_fixed_group "MAG - Annotation (GTDB/Bakta)" "GTDB|Bakta" "\033[1;35m" "$LIMIT_ANNO" ""
         fi
-        # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
-        local min_total_lines=10
-        while [ "$line_count" -lt "$min_total_lines" ]; do printf "\n" >&2; line_count=$((line_count + 1)); done
-        
         export LAST_PRINT_LINES="$line_count"
     else
         log_info "--- [${current}/${total}] ${percent}% Processing: ${sample_name} ---"
     fi
+    
     echo "[PROGRESS] [${current}/${total}] ${percent}% - Processing: ${sample_name}" >> "$LOG_FILE"
 }
