@@ -427,7 +427,8 @@ print_progress_bar() {
         local BRACKEN_LIMIT=3
         
         # 전체 대시보드 높이 계산: 헤더(1) + (그룹헤더(1)+본문)*3 = 총 15줄
-        local TOTAL_HEIGHT=$(( 1 + (1 + QC_LIMIT) + (1 + KRAKEN_LIMIT) + (1 + BRACKEN_LIMIT) ))
+        #local TOTAL_HEIGHT=$(( 1 + (1 + QC_LIMIT) + (1 + KRAKEN_LIMIT) + (1 + BRACKEN_LIMIT) ))
+        local TOTAL_HEIGHT=$(( 1 + (1 + QC_LIMIT) + (1 + KRAKEN_LIMIT) + (1 + BRACKEN_LIMIT) + (1 + 3) + (1 + 2) + (1 + 2) ))
         
         # 1. 커서 이동: 처음이 아니면 고정 높이만큼 위로 이동
         local lines_to_clear=${LAST_PRINT_LINES:-0}
@@ -494,6 +495,9 @@ print_progress_bar() {
         print_fixed_group "QC (KneadData/fastp)" "QC" "\033[1;33m" "$QC_LIMIT" "$all_status"
         print_fixed_group "Kraken2 (Taxonomy)" "Kraken" "\033[1;34m" "$KRAKEN_LIMIT" "$all_status"
         print_fixed_group "Annotation (Bracken/MPA)" "Bracken" "\033[1;35m" "$BRACKEN_LIMIT" "$all_status"
+        print_fixed_group "MAG - Assembly" "Assembly" "\033[1;36m" "3" "$all_status"
+        print_fixed_group "MAG - Binning" "Binning" "\033[1;32m" "2" "$all_status"
+        print_fixed_group "MAG - Annotation (GTDB/Bakta)" "GTDB|Bakta" "\033[1;35m" "2" "$all_status"
 
         export LAST_PRINT_LINES="$TOTAL_HEIGHT"
     else
