@@ -5,23 +5,15 @@
 set -euo pipefail
 
 # [scripts/qc.sh 와 scripts/mag.sh 상단에 넣을 코드]
-_term_handler() {
-    # 1. 마스터(run_all.sh)가 실행한 경우 -> 조용히 종료 (마스터가 알아서 다 죽여줌)
-    if [[ -n "${DOKKAEBI_MASTER_COMMAND:-}" ]]; then
-        exit 130
-    fi
+if [[ -z "${DOKKAEBI_MASTER_COMMAND:-}" ]]; then
+    _term_handler() {
+        echo "Local Abort."
+        pkill -9 -P $$
+        exit 1
+    }
+    trap _term_handler SIGINT SIGTERM
+fi
 
-    # 2. 단독으로 실행한 경우 -> 내가 책임지고 청소 (메시지 출력)
-    trap - SIGINT SIGTERM
-    echo -e "\n\033[0;31m[SUB-PROCESS] Ctrl+C detected! Killing local jobs...\033[0m" >&2
-    pkill -9 -P $$ 2>/dev/null || true
-    
-    # (단독 실행 시에도 분석 툴 정리가 필요하다면 아래 내용 추가 가능)
-    # pkill -9 -u "$(whoami)" -f "kneaddata" ... (필요시)
-    
-    exit 130
-}
-trap _term_handler SIGINT SIGTERM
 FULL_COMMAND_QC="$0 \"$@\""
 
 shopt -s nullglob

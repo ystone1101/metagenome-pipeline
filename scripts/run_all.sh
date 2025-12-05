@@ -6,27 +6,31 @@ set -euo pipefail
 
 # [scripts/run_all.sh 상단에 넣을 코드]
 _term_handler() {
-    trap - SIGINT SIGTERM # 중복 호출 방지
-    if [ -t 2 ]; then
-        echo -e "\n\033[0;31m[ABORT] Ctrl+C detected! Force killing all processes...\033[0m" >&2
-    fi
+    # 1. [중요] 중복 신호 차단: 이제부터 오는 신호는 무시한다. (재귀 호출 방지)
+    trap "" SIGINT SIGTERM
 
-    # 자식 프로세스 즉시 사살
+    echo -e "\n\033[0;31m[MASTER] Ctrl+C detected! Force killing ALL processes...\033[0m" >&2
+    
+    # 2. 내 직계 자식들(qc.sh, mag.sh 등)에게 '유언 남길 시간' 안 주고 즉시 사살 (SIGKILL)
+    # 이렇게 해야 자식들이 [ABORT] 메시지를 뱉지 않고 조용히 사라짐.
     pkill -9 -P $$ 2>/dev/null || true
 
-    # 분석 툴 확인 사살
-    TOOLS_TO_KILL=("qc.sh" "mag.sh" "kneaddata" "fastp" "kraken2" "bracken" "megahit" "metawrap" "gtdbtk" "bakta" "diamond" "perl" "pigz" "java" "python")
+    # 3. 혹시 모를 분석 툴 잔재 확인 사살
+    TOOLS_TO_KILL=("kneaddata" "fastp" "kraken2" "bracken" "megahit" "metawrap" "gtdbtk" "bakta" "diamond" "perl" "pigz" "java" "python")
     for tool in "${TOOLS_TO_KILL[@]}"; do
         pkill -9 -u "$(whoami)" -f "$tool" 2>/dev/null || true
     done
 
-    # 상태 파일 정리
+    # 4. 상태 파일 정리
     if [ -n "${OUTPUT_DIR:-}" ]; then
         find "$OUTPUT_DIR" -name "*.processing" -delete 2>/dev/null || true
     fi
-    exit 130
+    
+    # 5. [핵심] 나 자신도 강제 종료 (절대 루프로 돌아가지 않음)
+    kill -9 $$
 }
 trap _term_handler SIGINT SIGTERM
+
 FULL_COMMAND_RUN_ALL="$0 \"$@\""
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
