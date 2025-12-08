@@ -456,6 +456,34 @@ fi
 
 log_info "Pre/Post QC 리포트 생성 완료. 경로: ${MULTIQC_OUT}"
 
+# =================================================================
+# --- [NEW] KneadData QC 리포트 생성 (자동화) ---
+# =================================================================
+# Host 모드일 때만 KneadData 로그가 생성되므로, Host 모드에서만 실행
+if [[ "$MODE" == "host" ]]; then
+    log_info "Generating KneadData QC Summary Report..."
+    
+    # 1. 저장할 파일 경로 지정 (Base Dir에 저장)
+    SUMMARY_CSV="${BASE_DIR}/KneadData_QC_Summary.csv"
+    
+    # 2. Python 스크립트 위치
+    QC_REPORT_SCRIPT="${PROJECT_ROOT_DIR}/lib/generate_qc_report.py"
+    
+    if [ -f "$QC_REPORT_SCRIPT" ]; then
+        # 3. Python 스크립트 실행 (로그 파일로 리다이렉션하여 조용히 실행)
+        # 인자 1: 로그 폴더 ($KNEADDATA_LOG)
+        # 인자 2: 저장할 CSV 파일 ($SUMMARY_CSV)
+        
+        conda run -n "$KNEADDATA_ENV" python "$QC_REPORT_SCRIPT" "$KNEADDATA_LOG" "$SUMMARY_CSV" >> "$LOG_FILE" 2>&1 || log_warn "Failed to generate QC Summary CSV."
+        
+        if [ -f "$SUMMARY_CSV" ]; then
+            log_info "QC Summary Report saved to: $SUMMARY_CSV"
+        fi
+    else
+        log_warn "QC report script not found: $QC_REPORT_SCRIPT"
+    fi
+fi
+
 # 9. 완료 메시지
 #mv "$STATE_FILE_NEW" "$STATE_FILE"
 log_info "--- 모든 샘플 분석 및 결과 통합 완료 ---"
