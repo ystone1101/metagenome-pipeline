@@ -263,17 +263,22 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
 
             log_info "${SAMPLE}: 신규 QC 분석을 시작합니다."
 
-            MY_SLOT=""
+            MY_QC_SLOT=""
             while true; do
                 for ((i=1; i<=MAX_KNEAD_JOBS; i++)); do
                     exec 9>"${LOCK_DIR}/knead_slot_${i}"
-                    if flock -n 9; then MY_SLOT=$i; break 2; fi # 성공 시 루프 탈출
+                    if flock -n 9; then MY_QC_SLOT=$i; break 2; fi # 성공 시 루프 탈출
                     exec 9>&-
                 done
                 sleep 5
             done
-            
+
             log_info "  [KneadData START] $SAMPLE (Slot #$MY_SLOT)"
+                        
+            (
+                flock -x 200
+                # 락을 얻었다는 건, 현재 Kraken2를 돌리는 애가 없다는 뜻!
+            ) 200>"${LOCK_DIR}/kraken_lock"
             
             #cleaned_files_str="" # 결과 경로를 담을 변수 초기화
             
