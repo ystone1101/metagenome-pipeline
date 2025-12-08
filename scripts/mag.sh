@@ -404,7 +404,10 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
 
     FINAL_SAMPLE_SUCCESS_FLAG="$BAKTA_MAGS_SUCCESS_FLAG"
     if [[ "$RUN_MODE" == "megahit" ]]; then FINAL_SAMPLE_SUCCESS_FLAG="$POST_ASSEMBLY_SUCCESS_FLAG"; fi
-    if [ -f "$FINAL_SAMPLE_SUCCESS_FLAG" ]; then log_info "All MAG analysis steps for ${SAMPLE} are already complete. Skipping."; continue; fi
+    if [ -f "$FINAL_SAMPLE_SUCCESS_FLAG" ]; then 
+        echo "[INFO]$(date +'%Y-%m-%d %H:%M:%S') | All MAG steps for ${SAMPLE} completed. Skipping." >> "$LOG_FILE"
+        continue
+    fi
 
     # --- 각 단계에서 사용할 경로 정의 ---
     ASSEMBLY_OUT_DIR_SAMPLE="${ASSEMBLY_DIR}/${SAMPLE}"
@@ -412,10 +415,14 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     FINAL_BINS_DIR="${METAWRAP_DIR}/${SAMPLE}/bin_refinement/metawrap_${MIN_COMPLETENESS}_${MAX_CONTAMINATION}_bins"
     REPAIR_DIR_SAMPLE="${REPAIR_DIR}/${SAMPLE}"
     
+    set_job_status "$SAMPLE" "Initializing MAG Analysis..."
+
     # --- 모드별 실행 로직 ---
     if [[ "$RUN_MODE" == "post-process" ]]; then
         # === Post-process 모드 ===
-        log_info "Mode: post-process. Checking for existing results..."
+        set_job_status "$SAMPLE" "Running Post-process Analysis..."
+
+        # log_info "Mode: post-process. Checking for existing results..."
         
         # Contig 분석
         if [[ ! -f "$ASSEMBLY_FA" ]]; then
@@ -455,8 +462,9 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         R1_REPAIRED_GZ="${REPAIR_DIR_SAMPLE}/${SAMPLE}_R1.repaired.fastq.gz"
         # .success 플래그와 실제 결과 파일(.fastq.gz) 존재 여부를 함께 확인
         if [ -f "$REPAIR_SUCCESS_FLAG" ]; then
-            log_info "Read pair repair for ${SAMPLE} already complete. Skipping."
+            echo "[INFO] Repair done for ${SAMPLE}" >> "$LOG_FILE"
         else
+            set_job_status "$SAMPLE" "Repairing reads (BBMap)..."
             mkdir -p "$REPAIR_DIR_SAMPLE"
             repaired_files=($(run_pair_repair "$SAMPLE" "$R1_QC_GZ" "$R2_QC_GZ" "$REPAIR_DIR_SAMPLE"))
             if [[ ! -s "${repaired_files[0]}" ]]; then log_warn "Read pair repairing failed."; continue; fi
@@ -470,38 +478,38 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
             # if [ -f "$ASSEMBLY_SUCCESS_FLAG" ] && [ -s "$ASSEMBLY_FA" ]; then
             #    log_info "Assembly for ${SAMPLE} already exists. Skipping."
             if [ -f "$ASSEMBLY_SUCCESS_FLAG" ]; then
-                log_info "Assembly for ${SAMPLE} already exists. Skipping."
+                echo "[INFO] Assembly done for ${SAMPLE}" >> "$LOG_FILE"
             else
+                set_job_status "$SAMPLE" "Running Assembly (MEGAHIT)..."
                 run_megahit "$SAMPLE" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "$ASSEMBLY_OUT_DIR_SAMPLE" "$MEGAHIT_PRESET_TO_USE" "$MEMORY_GB" "$MIN_CONTIG_LEN" "$THREADS" "$MEGAHIT_EXTRA_OPTS"
                 if [ $? -eq 0 ]; then touch "$ASSEMBLY_SUCCESS_FLAG"; else log_warn "Assembly for ${SAMPLE} failed."; continue; fi
             fi
             
             # Assembly 성공 여부와 관계없이 후속 분석 실행 (내부에서 파일 존재 여부 확인)
             if [ -f "$POST_ASSEMBLY_SUCCESS_FLAG" ]; then 
-                log_info "Post-assembly analysis for ${SAMPLE} already exists. Skipping." 
+                echo "[INFO] Post-Assembly done for ${SAMPLE}" >> "$LOG_FILE" 
             else
 
                 if [ -f "$ASSEMBLY_SUCCESS_FLAG" ]; then
-                    log_info "Starting post-assembly analysis for ${SAMPLE}..."
-                
+                    set_job_status "$SAMPLE" "Running Post-Assembly Stats..."
                     STATS_OUT_FILE="${ASSEMBLY_STATS_DIR}/${SAMPLE}_assembly_stats.txt"
                     conda run -n "$BBMAP_ENV" stats.sh in="$ASSEMBLY_FA" > "$STATS_OUT_FILE"
                     
                     if [ "$SKIP_CONTIG_ANALYSIS" = false ]; then
-                        log_info "Running post-assembly taxonomic analysis (Kraken2 & Bakta)..."
-                        
+                        set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
                         KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
                         run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS"
                         
-                        if [ "$SKIP_BAKTA" = false ]; then
+                        if [ "$SKIP_CONTIG_ANALYSIS" = false ] && [ "$SKIP_BAKTA" = false ]; then
+                            set_job_status "$SAMPLE" "Running Bakta on Contigs..."
                             BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
                             run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
                         else
-                            log_info "Skipping Bakta on contigs (--skip-bakta enabled)."
+                            echo "[INFO] Skipping Bakta on contigs (--skip-bakta enabled) for ${SAMPLE}" >> "$LOG_FILE"
                         fi
 
                     else
-                        log_info "--skip-contig-analysis enabled. Skipping Kraken2 and Bakta on contigs."
+                        echo "[INFO] Skipping Kraken2 and Bakta on contigs (--skip-contig-analysis enabled) for ${SAMPLE}" >> "$LOG_FILE"
                     fi
                     
                     touch "$POST_ASSEMBLY_SUCCESS_FLAG"
@@ -519,8 +527,9 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                 #    log_info "Binning for ${SAMPLE} already exists. Skipping."
                 #else
                 if [ -f "$BINNING_SUCCESS_FLAG" ]; then
-                    log_info "Binning for ${SAMPLE} already exists. Skipping."
-                else 
+                    echo "[INFO] Binning done for ${SAMPLE}" >> "$LOG_FILE"
+                else
+                    set_job_status "$SAMPLE" "Running Binning (MetaWRAP)..." 
                     run_metawrap_sample "$SAMPLE" "$ASSEMBLY_FA" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "${METAWRAP_DIR}/${SAMPLE}" "$MIN_COMPLETENESS" "$MAX_CONTAMINATION" "$METAWRAP_BINNING_EXTRA_OPTS" "$METAWRAP_REFINEMENT_EXTRA_OPTS"
                     if [[ -d "$FINAL_BINS_DIR" && -n "$(ls -A "$FINAL_BINS_DIR" 2>/dev/null)" ]]; then touch "$BINNING_SUCCESS_FLAG"; else log_warn "Binning for ${SAMPLE} failed."; continue; fi
                 fi
@@ -532,17 +541,21 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                 GTDBTK_SUMMARY_FILE_AR="${GTDBTK_OUT_DIR_SAMPLE}/gtdbtk.ar53.summary.tsv"
                 
                 if [ -f "$GTDBTK_SUCCESS_FLAG" ] && { [ -f "$GTDBTK_SUMMARY_FILE_BAC" ] || [ -f "$GTDBTK_SUMMARY_FILE_AR" ]; }; then
-                    log_info "GTDB-Tk for ${SAMPLE} already exists. Skipping."
+                    echo "[INFO] GTDB-Tk done for ${SAMPLE}" >> "$LOG_FILE"
                 else
                     if [ -f "$BINNING_SUCCESS_FLAG" ]; then
+                    set_job_status "$SAMPLE" "Running GTDB-Tk..."
                         run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS"
                         if [[ -f "$GTDBTK_SUMMARY_FILE_BAC" || -f "$GTDBTK_SUMMARY_FILE_AR" ]]; then touch "$GTDBTK_SUCCESS_FLAG"; else log_warn "GTDB-Tk for ${SAMPLE} failed."; fi
                     fi
                 fi
                 
                 # 6. Bakta on MAGs 단계 (이 단계는 여러 파일을 생성하므로 .success 플래그만으로 확인)
-                if [ -f "$BAKTA_MAGS_SUCCESS_FLAG" ]; then log_info "Bakta on MAGs for ${SAMPLE} already exists. Skipping."; else
+                if [ -f "$BAKTA_MAGS_SUCCESS_FLAG" ]; then 
+                    echo "[INFO] Bakta on MAGs done for ${SAMPLE}" >> "$LOG_FILE"
+                else
                     if [ -f "$GTDBTK_SUCCESS_FLAG" ]; then
+                        set_job_status "$SAMPLE" "Running Bakta on MAGs..."
                         run_bakta_for_mags "$SAMPLE" "$FINAL_BINS_DIR" "${BAKTA_ON_MAGS_DIR}/${SAMPLE}" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
                         touch "$BAKTA_MAGS_SUCCESS_FLAG"
                     fi
