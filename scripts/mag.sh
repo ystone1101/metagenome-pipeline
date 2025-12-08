@@ -545,7 +545,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                 else
                     if [ -f "$BINNING_SUCCESS_FLAG" ]; then
                     set_job_status "$SAMPLE" "Running GTDB-Tk..."
-                        run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS"
+                        run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
                         if [[ -f "$GTDBTK_SUMMARY_FILE_BAC" || -f "$GTDBTK_SUMMARY_FILE_AR" ]]; then touch "$GTDBTK_SUCCESS_FLAG"; else log_warn "GTDB-Tk for ${SAMPLE} failed."; fi
                     fi
                 fi
@@ -556,7 +556,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                 else
                     if [ -f "$GTDBTK_SUCCESS_FLAG" ]; then
                         set_job_status "$SAMPLE" "Running Bakta on MAGs..."
-                        run_bakta_for_mags "$SAMPLE" "$FINAL_BINS_DIR" "${BAKTA_ON_MAGS_DIR}/${SAMPLE}" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
+                        run_bakta_for_mags "$SAMPLE" "$FINAL_BINS_DIR" "${BAKTA_ON_MAGS_DIR}/${SAMPLE}" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
                         touch "$BAKTA_MAGS_SUCCESS_FLAG"
                     fi
                 fi
