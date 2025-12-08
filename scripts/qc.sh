@@ -273,7 +273,7 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
                 sleep 5
             done
 
-            log_info "  [KneadData START] $SAMPLE (Slot #$MY_SLOT)"
+            log_info "  [KneadData START] $SAMPLE (Slot #$MY_QC_SLOT)"
                         
             (
                 flock -x 200
@@ -334,7 +334,7 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
       
             # QC 단계가 성공적으로 끝나면 성공 플래그를 생성합니다.
             touch "$QC_SUCCESS_FLAG"
-            log_info "  [KneadData DONE] $SAMPLE (Slot #$MY_SLOT released)"
+            log_info "  [KneadData DONE] $SAMPLE (Slot #$MY_QC_SLOT released)"
 
             # [신규 추가] 슬롯 반납 (중요!)
             flock -u 9
