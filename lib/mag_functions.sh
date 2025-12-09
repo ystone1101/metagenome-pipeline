@@ -534,3 +534,87 @@ run_pipeline_test() {
         echo -e "\033[0;32m    ALL TESTS PASSED! The pipeline is working correctly.\033[0m"; exit 0
     fi
 }
+
+#--- [Pro 3.6] EggNOG Annotation for Contigs (Default Strategy) ---
+run_eggnog_on_contigs() {
+    local sample_name=$1; local assembly_file=$2; local out_dir=$3; local eggnog_db_path=$4; local extra_opts="${5:-}"; local summary_csv="${6:-}"
+    
+    log_info "${sample_name}: Running EggNOG-mapper on Contigs..."
+    mkdir -p "$out_dir"
+    
+    local protein_file="${out_dir}/${sample_name}.faa"
+    local gene_file="${out_dir}/${sample_name}.ffn"
+    local gff_file="${out_dir}/${sample_name}.gff"
+    local eggnog_output_prefix="${out_dir}/${sample_name}"
+
+    # Checkpoint
+    if [[ -f "${eggnog_output_prefix}.emapper.annotations" ]]; then
+        echo "[INFO] EggNOG annotation for ${sample_name} already exists. Skipping." >> "$LOG_FILE"
+        return 0
+    fi
+
+    # 1. Prodigal 실행 (유전자/단백질 서열 추출)
+    # (Bakta 환경엔 prodigal 바이너리가 없을 수 있으므로 GTDBTK_ENV 사용)
+    if [[ ! -f "$protein_file" ]]; then
+        # log_info "  [Prodigal] Predicting genes..."
+        conda run -n "$GTDBTK_ENV" prodigal \
+            -i "$assembly_file" \
+            -a "$protein_file" \
+            -d "$gene_file" \
+            -o "$gff_file" \
+            -f gff \
+            -p meta -q > /dev/null 2>&1
+    fi
+
+    # 2. EggNOG-mapper 실행
+    # log_info "  [EggNOG] Annotating proteins..."
+    (
+        CONDA_BASE=$(conda info --base)
+        if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then source "${CONDA_BASE}/etc/profile.d/conda.sh"; else source ~/miniconda3/etc/profile.d/conda.sh; fi
+        conda activate "$EGGNOG_ENV"
+        
+        # 화면 출력 방지를 위해 로그 파일로 리다이렉션 (>> "$LOG_FILE" 2>&1)
+        emapper.py -i "$protein_file" \
+            --output "$sample_name" \
+            --output_dir "$out_dir" \
+            --data_dir "$eggnog_db_path" \
+            -m diamond --itype proteins --cpu "$THREADS" \
+            --metagenome \
+            --go_evidence non-electronic \
+            --tax_scope auto \
+            --override $extra_opts >> "$LOG_FILE" 2>&1
+    )
+    
+    log_info "${sample_name}: EggNOG annotation finished."
+
+# 3. 주석 비율 검증
+    check_annotation_ratio "$sample_name" "$protein_file" "$annotation_file"
+}
+
+# --- [내부 함수] 주석 비율 계산기 (유지) ---
+check_annotation_ratio() {
+    local sample=$1; local prot_file=$2; local annot_file=$3
+    
+    if [[ -f "$prot_file" && -f "$annot_file" ]]; then
+        local total_genes=$(grep -c "^>" "$prot_file")
+        local annotated_genes=$(grep -v "^#" "$annot_file" | wc -l)
+        
+        if [ "$total_genes" -gt 0 ]; then
+            local ratio=$(awk -v a="$annotated_genes" -v t="$total_genes" 'BEGIN {printf "%.2f", (a/t)*100}')
+            local msg="${sample}: Functional Annotation Ratio = ${ratio}% ($annotated_genes / $total_genes)"
+            
+            if (( $(echo "$ratio >= 80.0" | bc -l) )); then
+                log_info "[PASS] $msg (>= 80%)"
+            else
+                log_warn "[LOW-QUAL] $msg (< 80% - Check assembly quality)"
+            fi
+
+            if [[ -n "$csv_file" ]]; then
+                # 중복 기록 방지 (이미 해당 샘플이 있으면 덮어쓰지 않고 넘어감, 혹은 grep으로 체크)
+                if ! grep -q "^${sample}," "$csv_file"; then
+                    echo "${sample},${total_genes},${annotated_genes},${ratio},${status}" >> "$csv_file"
+                fi
+            fi
+        fi
+    fi
+}

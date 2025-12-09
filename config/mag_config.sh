@@ -10,6 +10,7 @@ METAWRAP_ENV="metawrap_env"
 KRAKEN_ENV="kraken_env"
 GTDBTK_ENV="gtdbtk_env"
 BAKTA_ENV="bakta_env"
+EGGNOG_ENV="eggnog_env"
 
 # --- Main Input Directory ---
 # 1단계 파이프라인의 QC 완료 파일이 있는 폴더
@@ -24,6 +25,7 @@ ASSEMBLY_DIR="${MAG_BASE_DIR}/01_assembly"
 ASSEMBLY_STATS_DIR="${MAG_BASE_DIR}/02_assembly_stats"
 KRAKEN_ON_CONTIGS_DIR="${MAG_BASE_DIR}/03_kraken_on_contigs"
 BAKTA_ON_CONTIGS_DIR="${MAG_BASE_DIR}/04_bakta_on_contigs"
+EGGNOG_ON_CONTIGS_DIR="${MAG_BASE_DIR}/04_eggnog_on_contigs"
 METAWRAP_DIR="${MAG_BASE_DIR}/05_metawrap"
 GTDBTK_ON_MAGS_DIR="${MAG_BASE_DIR}/06_gtdbtk_on_mags"
 BAKTA_ON_MAGS_DIR="${MAG_BASE_DIR}/07_bakta_on_mags"

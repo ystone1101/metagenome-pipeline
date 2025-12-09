@@ -72,13 +72,15 @@ print_usage() {
     echo "  --preset NAME            - MEGAHIT preset ('meta-sensitive' or 'meta-large'). (Default: meta-large)"
     echo "  --gtdbtk_db_dir PATH     - (Required) Path to the GTDB-Tk database."
     echo "  --bakta_db_dir PATH      - (Required for all modes) Path to the Bakta database."
+    echo "  --eggnog_db_dir PATH     - (Required if using EggNOG) Path to the EggNOG database."
     echo "  --kraken2_db PATH        - (Required) Path to the Kraken2 database."    
     echo "  --tmp_dir PATH           - Path to a temporary directory. (Default: /home/kys/Desktop/tmp)"
     echo ""
     echo -e "${CYAN}${BOLD}Tool-specific Options (pass-through):${NC}"
+    echo "  --annotation-tool STR   Tool for MAG annotation: 'eggnog' (default) or 'bakta'"
     echo "  --keep-temp-files        - Do not delete intermediate temporary files (for debugging)."
     echo "  --skip-contig-analysis   - Skip Kraken2 and Bakta analysis on assembled contigs."    
-    echo "  --skip-bakta             - Skip ONLY Bakta analysis on contigs."
+    echo "  --skip-annotation             - Skip ONLY Functional Annotation (Bakta/EggNOG) analysis on contigs."
     echo "  --verbose             - Show detailed logs in terminal instead of progress bar."      
     echo "  --megahit-opts OPTS     - Pass additional options to MEGAHIT (in quotes)."
     echo "  --metawrap-binning-opts OPTS   - Pass additional options to MetaWRAP's binning module."
@@ -86,6 +88,7 @@ print_usage() {
     echo "  --kraken2-opts OPTS     - Pass additional options to Kraken2 on contigs (in quotes)."
     echo "  --gtdbtk-opts OPTS      - Pass additional options to GTDB-Tk (in quotes)."
     echo "  --bakta-opts OPTS       - Pass additional options to Bakta (in quotes)."
+    echo "  --eggnog-opts OPTS    - Pass additional options to EggNOG-mapper (in quotes)."
     echo ""
     echo "  -h, --help              - Display this help message and exit."
     echo ""    
@@ -104,7 +107,7 @@ RUN_MODE="all"
 RUN_TEST_MODE=false
 KEEP_TEMP_FILES=false
 SKIP_CONTIG_ANALYSIS=false
-SKIP_BAKTA=false
+SKIP_ANNOTATION=false
 INPUT_DIR_ARG=""
 RAW_INPUT_DIR=""
 OUTPUT_DIR_ARG=""
@@ -126,6 +129,9 @@ METAWRAP_REFINEMENT_EXTRA_OPTS=""
 KRAKEN2_EXTRA_OPTS=""
 GTDBTK_EXTRA_OPTS=""
 BAKTA_EXTRA_OPTS=""
+ANNOTATION_TOOL="eggnog"
+EGGNOG_DB_DIR_ARG=""
+EGGNOG_EXTRA_OPTS=""
 
 # --- 커맨드 라인 인자 파싱 ---
 while [ $# -gt 0 ]; do
@@ -133,7 +139,7 @@ while [ $# -gt 0 ]; do
         --test) RUN_TEST_MODE=true; shift ;;
         --keep-temp-files) KEEP_TEMP_FILES=true; shift ;;
         --skip-contig-analysis) SKIP_CONTIG_ANALYSIS=true; shift ;;
-        --skip-bakta) SKIP_BAKTA=true; shift ;;        
+        --skip-annotation) SKIP_BAKTA=true; shift ;;        
         megahit|metawrap|all|post-process) RUN_MODE=$1; shift ;;
         --input_dir) INPUT_DIR_ARG="${2%/}"; shift 2 ;;
         --raw_input_dir) RAW_INPUT_DIR="${2%/}"; shift 2 ;;
@@ -144,7 +150,9 @@ while [ $# -gt 0 ]; do
         --gtdbtk_db_dir) GTDBTK_DB_DIR_ARG="$2"; shift 2 ;;
         --bakta_db_dir) BAKTA_DB_DIR_ARG="$2"; shift 2 ;;
         --kraken2_db) KRAKEN2_DB_ARG="$2"; shift 2 ;;
+        --eggnog_db_dir) EGGNOG_DB_DIR_ARG="$2"; shift 2 ;;
         --tmp_dir) TMP_DIR_ARG="$2"; shift 2 ;;
+        --annotation-tool) ANNOTATION_TOOL="$2"; shift 2 ;;
         --min_contig_len) MIN_CONTIG_LEN="$2"; shift 2 ;;
         --min_completeness) MIN_COMPLETENESS="$2"; shift 2 ;;
         --max_contamination) MAX_CONTAMINATION="$2"; shift 2 ;;
@@ -154,6 +162,7 @@ while [ $# -gt 0 ]; do
         --kraken2-opts) KRAKEN2_EXTRA_OPTS="$2"; shift 2 ;;
         --gtdbtk-opts) GTDBTK_EXTRA_OPTS="$2"; shift 2 ;;
         --bakta-opts) BAKTA_EXTRA_OPTS="$2"; shift 2 ;;
+        --eggnog-opts) EGGNOG_EXTRA_OPTS="$2"; shift 2 ;;
         --verbose) VERBOSE_MODE=true; shift ;;
         *) shift ;;
     esac
@@ -226,9 +235,21 @@ if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "metawrap" || "$RUN_MODE" == "post-
     fi
 fi
 
-# 3c. Bakta 데이터베이스 경로 확인
+# 3c_1. eggnog 선택 시 데이터베이스 경로 확인
+# [수정] Contig 분석을 할 때만(AND Annotation 스킵이 아닐 때만) DB 확인
+if [[ "$ANNOTATION_TOOL" == "eggnog" ]]; then
+    if [[ "$SKIP_CONTIG_ANALYSIS" == "false" && "$SKIP_ANNOTATION" == "false" ]]; then
+        if [[ -z "$EGGNOG_DB_DIR_ARG" ]]; then
+            error_messages+=("  - --eggnog_db_dir: Annotation 도구로 'eggnog'를 선택했을 경우 필수입니다.")
+        elif [[ ! -d "$EGGNOG_DB_DIR_ARG" ]]; then
+            error_messages+=("  - --eggnog_db_dir: '${EGGNOG_DB_DIR_ARG}' 경로에 디렉토리가 없습니다.")
+        fi
+    fi
+fi
+
+# 3c_2. Bakta 데이터베이스 경로 확인
 if [[ -z "$BAKTA_DB_DIR_ARG" ]]; then
-    error_messages+=("  - --bakta_db_dir: 모든 모드에서 필수입니다.")
+    error_messages+=("  - --bakta_db_dir: 모든 모드(MAG 분석 포함)에서 필수입니다.")
 elif [[ ! -d "$BAKTA_DB_DIR_ARG" ]]; then
     error_messages+=("  - --bakta_db_dir: '${BAKTA_DB_DIR_ARG}' 경로에 디렉토리가 없습니다.")
 fi
@@ -289,16 +310,22 @@ source "${PROJECT_ROOT_DIR}/config/mag_config.sh"
 source "${PROJECT_ROOT_DIR}/lib/mag_functions.sh"
 
 # --- 5. 디렉토리 및 로그 파일 설정 ---
-mkdir -p "$MAG_BASE_DIR"
-mkdir -p "$REPAIR_DIR"
-mkdir -p "$ASSEMBLY_DIR"
-mkdir -p "$ASSEMBLY_STATS_DIR"
-mkdir -p "$KRAKEN_ON_CONTIGS_DIR"
-mkdir -p "$BAKTA_ON_CONTIGS_DIR"
-mkdir -p "$METAWRAP_DIR"
-mkdir -p "$GTDBTK_ON_MAGS_DIR"
-mkdir -p "$BAKTA_ON_MAGS_DIR"
-mkdir -p "$TMP_DIR_ARG"
+mkdir -p "$MAG_BASE_DIR" "$REPAIR_DIR" "$ASSEMBLY_DIR" "$ASSEMBLY_STATS_DIR" \
+         "$KRAKEN_ON_CONTIGS_DIR" "$METAWRAP_DIR" \
+         "$GTDBTK_ON_MAGS_DIR" "$BAKTA_ON_MAGS_DIR" "$TMP_DIR_ARG"
+
+if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
+    mkdir -p "$BAKTA_ON_CONTIGS_DIR"
+elif [[ "$ANNOTATION_TOOL" == "eggnog" ]]; then
+    mkdir -p "$EGGNOG_ON_CONTIGS_DIR"
+fi
+
+EGGNOG_SUMMARY_CSV="${MAG_BASE_DIR}/eggnog_annotation_summary.csv"
+
+if [ ! -f "$EGGNOG_SUMMARY_CSV" ]; then
+    echo "Sample_ID,Total_Genes,Annotated_Genes,Ratio(%),Status" > "$EGGNOG_SUMMARY_CSV"
+fi
+
 LOG_FILE="${MAG_BASE_DIR}/3_mag_per_sample_$(date +%Y%m%d_%H%M%S).log"
 > "$LOG_FILE"; trap '_error_handler' ERR
 
@@ -421,26 +448,33 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     if [[ "$RUN_MODE" == "post-process" ]]; then
         # === Post-process 모드 ===
         set_job_status "$SAMPLE" "Running Post-process Analysis..."
-
-        # log_info "Mode: post-process. Checking for existing results..."
+        log_info "Mode: post-process. Checking for existing results..."
         
         # Contig 분석
         if [[ ! -f "$ASSEMBLY_FA" ]]; then
             log_warn "Assembly file not found for ${SAMPLE}. Skipping contig-level post-analysis."
         else
             if [ "$SKIP_CONTIG_ANALYSIS" = false ]; then
-                KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
-                run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS"
+            set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
+            KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
+            run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
             
-                if [ "$SKIP_BAKTA" = false ]; then
-                    BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
-                    run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
+                if [ "$SKIP_ANNOTATION" = false ]; then
+                    if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
+                        set_job_status "$SAMPLE" "Running Bakta on Contigs..."
+                        BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
+                        run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                    elif [[ "$ANNOTATION_TOOL" == "eggnog" ]]; then
+                        set_job_status "$SAMPLE" "Running EggNOG on Contigs..."
+                        EGGNOG_CONTIGS_OUT_DIR_SAMPLE="${EGGNOG_ON_CONTIGS_DIR}/${SAMPLE}"
+                        run_eggnog_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$EGGNOG_CONTIGS_OUT_DIR_SAMPLE" "$EGGNOG_DB_DIR_ARG" "$EGGNOG_EXTRA_OPTS" "$EGGNOG_SUMMARY_CSV"
+                    fi
                 else
-                    log_info "Skipping Bakta on contigs (--skip-bakta enabled)"
+                    echo "[INFO] Skipping Contig Annotation (--skip-annotation)." >> "$LOG_FILE"
                 fi
-
+                
             else
-                log_info "Skipping ALL contig analysis (Kraken2 & Bakta)"
+                echo "[INFO] Skipping ALL contig analysis." >> "$LOG_FILE"
             fi   
         fi
 
@@ -491,25 +525,34 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
             else
 
                 if [ -f "$ASSEMBLY_SUCCESS_FLAG" ]; then
+                    log_info "Starting post-assembly analysis for ${SAMPLE}..."
                     set_job_status "$SAMPLE" "Running Post-Assembly Stats..."
                     STATS_OUT_FILE="${ASSEMBLY_STATS_DIR}/${SAMPLE}_assembly_stats.txt"
                     conda run -n "$BBMAP_ENV" stats.sh in="$ASSEMBLY_FA" > "$STATS_OUT_FILE"
-                    
+
                     if [ "$SKIP_CONTIG_ANALYSIS" = false ]; then
+                        # 1. Kraken2 (Taxonomy) - 항상 실행
                         set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
                         KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
-                        run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS"
-                        
-                        if [ "$SKIP_CONTIG_ANALYSIS" = false ] && [ "$SKIP_BAKTA" = false ]; then
-                            set_job_status "$SAMPLE" "Running Bakta on Contigs..."
-                            BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
-                            run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
+                        run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+
+                        # 2. Annotation (Functional) - 선택적 실행
+                        if [ "$SKIP_ANNOTATION" = false ]; then
+                            if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
+                                set_job_status "$SAMPLE" "Running Bakta on Contigs..."
+                                BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
+                                run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                            elif [[ "$ANNOTATION_TOOL" == "eggnog" ]]; then
+                                set_job_status "$SAMPLE" "Running EggNOG on Contigs..."
+                                EGGNOG_CONTIGS_OUT_DIR_SAMPLE="${EGGNOG_ON_CONTIGS_DIR}/${SAMPLE}"
+                                run_eggnog_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$EGGNOG_CONTIGS_OUT_DIR_SAMPLE" "$EGGNOG_DB_DIR_ARG" "$EGGNOG_EXTRA_OPTS" "$EGGNOG_SUMMARY_CSV"
+                            fi
                         else
-                            echo "[INFO] Skipping Bakta on contigs (--skip-bakta enabled) for ${SAMPLE}" >> "$LOG_FILE"
+                            echo "[INFO] Skipping Contig Annotation (--skip-annotation enabled)." >> "$LOG_FILE"
                         fi
 
                     else
-                        echo "[INFO] Skipping Kraken2 and Bakta on contigs (--skip-contig-analysis enabled) for ${SAMPLE}" >> "$LOG_FILE"
+                        echo "[INFO] Skipping ALL contig analysis." >> "$LOG_FILE"
                     fi
                     
                     touch "$POST_ASSEMBLY_SUCCESS_FLAG"

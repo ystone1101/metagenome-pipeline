@@ -78,19 +78,33 @@ print_usage() {
     echo -e "  ${GREEN}environmental${NC} - For environmental samples (uses fastp for QC)."
     echo ""
     echo -e "${CYAN}${BOLD}Required Options:${NC}"
-    echo "  --input_dir PATH      - Path to the input directory with raw FASTQ files (for Pipeline 1)."
-    echo "  --output_dir PATH     - Path to the main output directory for the entire project."
-    echo "  --kraken2_db PATH     - Path to the Kraken2 database."
-    echo "  --gtdbtk_db PATH      - Path to the GTDB-Tk database."
-    echo "  --bakta_db PATH       - Path to the Bakta database."
-    echo "  --host_db PATH        - (Required for 'host' mode) Path to the host reference database for KneadData."
+    echo "  --input_dir PATH        Input directory containing raw FASTQ files"
+    echo "  --output_dir PATH       Main output directory"
+    echo "  --kraken2_db PATH       Kraken2 database path"
+    echo "  --gtdbtk_db PATH        GTDB-Tk database path"
+    echo "  --bakta_db PATH         Bakta database path (Required if using Bakta)"
+    echo "  --eggnog_db PATH        EggNOG database path (Required if using EggNOG)"
+    echo "  --host_db PATH          Host reference database (Required for 'host' mode)"
     echo ""
     echo -e "${CYAN}${BOLD}Optional Options:${NC}"
     echo "  --threads INT         - Number of threads for all tools. (Default: 6)"
     echo "  --memory_gb INT       - Max memory in Gigabytes for KneadData and MEGAHIT. (Default: 60)"
+    echo "  --annotation-tool STR   Tool for MAG annotation: 'eggnog' (default) or 'bakta'"
+    echo "  --skip-contig-analysis   - Skip Kraken2/Annotation analysis on assembled contigs."    
+    echo "  --skip-annotation             - Skip ONLY Functional Annotation (Bakta/EggNOG) analysis on contigs."
     echo "  --verbose             - Show detailed logs in terminal instead of progress bar."
-    echo "  --skip-contig-analysis   - Skip Kraken2 and Bakta analysis on assembled contigs."    
-    echo "  --skip-bakta             - Skip ONLY Bakta analysis on contigs."
+    echo ""
+    echo -e "${CYAN}Tool-specific Options (Pass-through):${NC}"
+    echo "  --kneaddata-opts STR           Pass options to KneadData (in quotes)"
+    echo "  --fastp-opts STR               Pass options to fastp (in quotes)"
+    echo "  --kraken2-opts STR             Pass options to Kraken2 (in quotes)"
+    echo "  --megahit-opts STR             Pass options to MEGAHIT (in quotes)"
+    echo "  --metawrap-binning-opts STR    Pass options to MetaWRAP Binning"
+    echo "  --metawrap-refinement-opts STR Pass options to MetaWRAP Refinement"
+    echo "  --gtdbtk-opts STR              Pass options to GTDB-Tk (in quotes)"
+    echo "  --bakta-opts STR               Pass options to Bakta (in quotes)"
+    echo "  --eggnog-opts STR              Pass options to EggNOG-mapper (in quotes)"
+    echo ""
     echo "  -h, --help            - Display this help message and exit."
     echo ""    
     echo ""
@@ -120,10 +134,10 @@ INPUT_DIR=""; OUTPUT_DIR=""; KRAKEN2_DB=""; GTDBTK_DB=""; BAKTA_DB=""; HOST_DB="
 THREADS=6; MEMORY_GB="60"
 # 모든 도구별 추가 옵션을 저장할 변수 초기화
 KNEADDATA_OPTS=""; FASTP_OPTS=""; KRAKEN2_OPTS=""; MEGAHIT_OPTS=""; METAWRAP_BINNING_OPTS=""
-METAWRAP_REFINEMENT_OPTS=""; GTDBTK_OPTS=""; BAKTA_OPTS=""
+METAWRAP_REFINEMENT_OPTS=""; GTDBTK_OPTS=""; BAKTA_OPTS=""; EGGNOG_OPTS=""
 
 SKIP_CONTIG_ANALYSIS=false
-SKIP_BAKTA=false
+SKIP_ANNOTATION=false
 VERBOSE_MODE=false 
 
 while [ $# -gt 0 ]; do
@@ -143,9 +157,12 @@ while [ $# -gt 0 ]; do
         --metawrap-binning-opts) METAWRAP_BINNING_OPTS="$2"; shift 2 ;;
         --metawrap-refinement-opts) METAWRAP_REFINEMENT_OPTS="$2"; shift 2 ;;
         --skip-contig-analysis) SKIP_CONTIG_ANALYSIS=true; shift ;;
-        --skip-bakta) SKIP_BAKTA=true; shift ;;
+        --skip-annotation) SKIP_ANNOTATION=true; shift ;;
+        --annotation-tool) ANNOTATION_TOOL="$2"; shift 2 ;;    
         --gtdbtk-opts) GTDBTK_OPTS="$2"; shift 2 ;;
+        --eggnog-opts) EGGNOG_OPTS="$2"; shift 2 ;;
         --bakta-opts) BAKTA_OPTS="$2"; shift 2 ;;
+
         --verbose) VERBOSE_MODE=true; shift ;;
         *) shift ;;
     esac
@@ -159,7 +176,17 @@ if [[ -z "$INPUT_DIR" ]]; then error_messages+=("  - --input_dir is required.");
 if [[ -z "$OUTPUT_DIR" ]]; then error_messages+=("  - --output_dir is required."); fi
 if [[ -z "$KRAKEN2_DB" ]]; then error_messages+=("  - --kraken2_db is required."); fi
 if [[ -z "$GTDBTK_DB" ]]; then error_messages+=("  - --gtdbtk_db is required."); fi
-if [[ -z "$BAKTA_DB" ]]; then error_messages+=("  - --bakta_db is required."); fi
+# if [[ -z "$BAKTA_DB" ]]; then error_messages+=("  - --bakta_db is required."); fi
+
+if [[ "$SKIP_ANNOTATION" == "false" && "$SKIP_CONTIG_ANALYSIS" == "false" ]]; then
+     if [[ "$ANNOTATION_TOOL" == "bakta" && -z "$BAKTA_DB" ]]; then
+         error_messages+=("  - --bakta_db is required (unless --skip-annotation or --skip-contig-analysis is used).")
+     fi
+     if [[ "$ANNOTATION_TOOL" == "eggnog" && -z "$EGGNOG_DB" ]]; then
+         error_messages+=("  - --eggnog_db is required (unless --skip-annotation or --skip-contig-analysis is used).")
+     fi
+fi
+
 if [[ "$P1_MODE" == "host" && -z "$HOST_DB" ]]; then error_messages+=("  - --host_db is required for 'host' mode."); fi
 
 if [ ${#error_messages[@]} -gt 0 ]; then
@@ -377,9 +404,9 @@ while true; do
             P2_CMD_ARRAY+=(--skip-contig-analysis)
         fi
         
-        # [중요] Bakta 스킵 옵션 전달
-        if [ "$SKIP_BAKTA" = true ]; then
-            P2_CMD_ARRAY+=(--skip-bakta)
+        # Annotation 스킵 옵션 전달
+        if [ "$SKIP_ANNOTATION" = true ]; then
+            P2_CMD_ARRAY+=(--skip-annotation)
         fi
 
         if [[ -n "$MEGAHIT_OPTS" ]]; then P2_CMD_ARRAY+=(--megahit-opts "$MEGAHIT_OPTS"); fi
@@ -388,6 +415,7 @@ while true; do
         if [[ -n "$KRAKEN2_OPTS" ]]; then P2_CMD_ARRAY+=(--kraken2-opts "$KRAKEN2_OPTS"); fi
         if [[ -n "$GTDBTK_OPTS" ]]; then P2_CMD_ARRAY+=(--gtdbtk-opts "$GTDBTK_OPTS"); fi
         if [[ -n "$BAKTA_OPTS" ]]; then P2_CMD_ARRAY+=(--bakta-opts "$BAKTA_OPTS"); fi
+        if [[ -n "$EGGNOG_OPTS" ]]; then P2_CMD_ARRAY+=(--eggnog-opts "$EGGNOG_OPTS"); fi
 
         # 1. MAG 실행
         if "${P2_CMD_ARRAY[@]}"; then
