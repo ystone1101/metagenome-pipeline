@@ -399,22 +399,39 @@ CURRENT_PROGRESS=0
 for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
 #    if [[ ! -f "$R1_QC_GZ" ]]; then continue; fi
     # --- 샘플 정보 설정 ---
+    # SAMPLE_BASE=$(basename "$R1_QC_GZ")
+    # SAMPLE=""; R2_QC_GZ=""
+    # if [[ "$SAMPLE_BASE" == *"_kneaddata_paired_"* ]]; then
+    #    SAMPLE=$(echo "$SAMPLE_BASE" | sed -e 's/_1_kneaddata_paired_1\.fastq\.gz//')
+    #    R2_QC_GZ="${QC_READS_DIR}/${SAMPLE}_1_kneaddata_paired_2.fastq.gz"
+    # elif [[ "$SAMPLE_BASE" == *"_fastp_"* ]]; then
+    #    SAMPLE=$(echo "$SAMPLE_BASE" | sed -e 's/_1_fastp_1\.fastq\.gz//')
+    #    R2_QC_GZ="${QC_READS_DIR}/${SAMPLE}_fastp_2.fastq.gz"
+    # elif [[ "$SAMPLE_BASE" == *"_1.fastq.gz" ]]; then
+    #    SAMPLE=$(echo "$SAMPLE_BASE" | sed -e 's/_1\.fastq\.gz//')
+    #    R2_QC_GZ="${QC_READS_DIR}/${SAMPLE}_2.fastq.gz"
+    #    
+    # else 
+    #    continue; 
+    # fi   
+    # --- 샘플 정보 설정 (유연한 패턴 매칭 적용) ---
+    if [[ ! -f "$R1_QC_GZ" ]]; then continue; fi
+
     SAMPLE_BASE=$(basename "$R1_QC_GZ")
-    SAMPLE=""; R2_QC_GZ=""
-    if [[ "$SAMPLE_BASE" == *"_kneaddata_paired_"* ]]; then
-        SAMPLE=$(echo "$SAMPLE_BASE" | sed -e 's/_1_kneaddata_paired_1\.fastq\.gz//')
-        R2_QC_GZ="${QC_READS_DIR}/${SAMPLE}_1_kneaddata_paired_2.fastq.gz"
-    elif [[ "$SAMPLE_BASE" == *"_fastp_"* ]]; then
-        SAMPLE=$(echo "$SAMPLE_BASE" | sed -e 's/_1_fastp_1\.fastq\.gz//')
-        R2_QC_GZ="${QC_READS_DIR}/${SAMPLE}_fastp_2.fastq.gz"
-    elif [[ "$SAMPLE_BASE" == *"_1.fastq.gz" ]]; then
-        SAMPLE=$(echo "$SAMPLE_BASE" | sed -e 's/_1\.fastq\.gz//')
-        R2_QC_GZ="${QC_READS_DIR}/${SAMPLE}_2.fastq.gz"
-        
-    else 
-        continue; 
-    fi
     
+    # 1. 파일명 끝의 _1.fastq.gz 패턴을 제거하여 샘플명(SAMPLE) 추출
+    # 예: SampleA_kneaddata_paired_1.fastq.gz -> SampleA_kneaddata_paired
+    SAMPLE="${SAMPLE_BASE%_1.fastq.gz}"
+    
+    # 2. R2 파일 경로 추론 (샘플명 + _2.fastq.gz)
+    R2_QC_GZ="${QC_READS_DIR}/${SAMPLE}_2.fastq.gz"
+    
+    # 3. R2 파일 존재 여부 확인
+    if [[ ! -f "$R2_QC_GZ" ]]; then 
+        log_warn "Paired QC file for $SAMPLE not found. Expected: $(basename "$R2_QC_GZ")"
+        continue
+    fi
+
     if [[ ! -f "$R2_QC_GZ" ]]; then log_warn "Paired QC file for $SAMPLE not found."; continue; fi
 
     # printf "\n" >&2; log_info "--- Processing sample '$SAMPLE' ---"

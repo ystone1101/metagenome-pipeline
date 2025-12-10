@@ -6,29 +6,38 @@ set -euo pipefail
 
 # [scripts/run_all.sh 상단에 넣을 코드]
 _term_handler() {
-    # 1. [중요] 중복 신호 차단: 이제부터 오는 신호는 무시한다. (재귀 호출 방지)
+    # 1. [중요] 중복 신호 차단: 처리 도중 또 신호가 오면 무시함
     trap "" SIGINT SIGTERM
 
-    echo -e "\n\033[0;31m[MASTER] Ctrl+C detected! Force killing ALL processes...\033[0m" >&2
+    echo -e "\n\033[0;33m[MASTER] Stop signal received! Stopping children gracefully...\033[0m" >&2
     
-    # 2. 내 직계 자식들(qc.sh, mag.sh 등)에게 '유언 남길 시간' 안 주고 즉시 사살 (SIGKILL)
-    # 이렇게 해야 자식들이 [ABORT] 메시지를 뱉지 않고 조용히 사라짐.
+    # 2. [수정] 자식들에게 '정리할 시간' 부여 (SIGTERM -15 전송)
+    # 이렇게 해야 qc.sh의 'trap cleanup_on_exit EXIT'이 발동되어 .processing 파일을 지움
+    pkill -15 -P $$ 2>/dev/null || true
+    
+    # 3. [신규] 자식들이 청소할 시간을 줌 (5초 대기)
+    echo -e "Waiting 5s for cleanup..." >&2
+    sleep 5
+    
+    # 4. [확인 사살] 말 안 듣고 버티는 프로세스 강제 종료 (SIGKILL -9)
+    echo -e "\033[0;31m[MASTER] Force killing remaining processes...\033[0m" >&2
     pkill -9 -P $$ 2>/dev/null || true
 
-    # 3. 혹시 모를 분석 툴 잔재 확인 사살
+    # 5. 분석 툴 프로세스 정리 (기존 로직 유지)
     TOOLS_TO_KILL=("kneaddata" "fastp" "kraken2" "bracken" "megahit" "metawrap" "gtdbtk" "bakta" "diamond" "perl" "pigz" "java" "python")
     for tool in "${TOOLS_TO_KILL[@]}"; do
         pkill -9 -u "$(whoami)" -f "$tool" 2>/dev/null || true
     done
 
-    # 4. 상태 파일 정리
+    # 6. 상태 파일 정리 (기존 유지)
     if [ -n "${OUTPUT_DIR:-}" ]; then
         find "$OUTPUT_DIR" -name "*.processing" -delete 2>/dev/null || true
     fi
     
-    # 5. [핵심] 나 자신도 강제 종료 (절대 루프로 돌아가지 않음)
+    # 7. 마스터 종료
     kill -9 $$
 }
+
 trap _term_handler SIGINT SIGTERM
 
 FULL_COMMAND_RUN_ALL="$0 \"$@\""

@@ -169,13 +169,25 @@ log_info "모든 소프트웨어 의존성 확인 완료."
 
 # --- 8. 샘플별 루프 (KneadData 병렬 + Kraken2 순차 하이브리드 적용) ---
 # [설정] 슬롯 개수 정의
-MAX_KNEAD_JOBS=2   # KneadData 동시 실행 수
-MAX_KRAKEN_JOBS=1  # Kraken2 동시 실행 수 (메모리 보호)
-MAX_PENDING_JOBS=20 # 대기열 제한 
+# MAX_KNEAD_JOBS=2   # KneadData 동시 실행 수
+# MAX_KRAKEN_JOBS=1  # Kraken2 동시 실행 수 (메모리 보호)
+
+# KneadData 하나가 원활하게 돌기 위한 권장 스레드 수
+RECOMMENDED_THREADS_PER_JOB=8
 
 # 스레드 계산 (KneadData용)
+# THREADS_PER_JOB=$(( THREADS / MAX_KNEAD_JOBS ))
+
+MAX_KNEAD_JOBS=$(( THREADS / RECOMMENDED_THREADS_PER_JOB ))
+if [[ "$MAX_KNEAD_JOBS" -lt 1 ]]; then MAX_KNEAD_JOBS=1; fi
+
+MAX_KRAKEN_JOBS=1
+MAX_PENDING_JOBS=20 # 대기열 제한 
+
 THREADS_PER_JOB=$(( THREADS / MAX_KNEAD_JOBS ))
-if (( THREADS_PER_JOB < 1 )); then THREADS_PER_JOB=1; fi
+# if (( THREADS_PER_JOB < 1 )); then THREADS_PER_JOB=1; fi # [기존 코드 주석 처리] (위에서 보장됨)
+
+log_info "Dynamic Resource Allocation: Running $MAX_KNEAD_JOBS jobs in parallel ($THREADS_PER_JOB threads each)."
 
 # 잠금 파일 저장할 임시 폴더 생성
 LOCK_DIR="${WORK_DIR}/locks"
@@ -191,6 +203,8 @@ rm -f "${STATUS_DIR}"/*.status
 
 TOTAL_FILES=$(find "$RAW_DIR" -maxdepth 1 -name "*_1.fastq.gz" -o -name "*_R1.fastq.gz" | wc -l)
 CURRENT_COUNT=0
+
+declare -a PIDS=()
 
 for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
     # --- 샘플 정보 파싱 --- 
@@ -305,7 +319,7 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
                 run_kneaddata "$SAMPLE" "$r1_uncompressed" "$r2_uncompressed" \
                     "$HOST_DB_ARG" "$WORK_DIR" "$CLEAN_DIR" "$KNEADDATA_LOG" \
                     "$FASTQC_PRE_QC_DIR" "$FASTQC_POST_QC_DIR" \
-                    "$KNEADDATA_THREADS" "$KNEADDATA_THREADS" "${MEMORY_MB}" "$TRIMMOMATIC_OPTIONS" \
+                    "$KNEADDATA_THREADS" "1" "${MEMORY_MB}" "$TRIMMOMATIC_OPTIONS" \
                     "$KNEADDATA_EXTRA_OPTS" > /dev/null
 
                 rm "$r1_uncompressed" "$r2_uncompressed"
@@ -403,11 +417,29 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
         clear_job_status "$SAMPLE"
 
     ) &
+
+    PIDS+=($!)
+
 done
 
 # [신규 추가] 모든 작업 종료 대기
-wait
-log_info "All QC jobs finished."
+# wait
+# log_info "All QC jobs finished."
+
+log_info "Waiting for all QC jobs to finish..."
+
+EXIT_CODE=0
+for pid in "${PIDS[@]}"; do
+    # 각 PID가 끝날 때까지 기다리고, 종료 코드를 확인
+    wait "$pid" || EXIT_CODE=1
+done
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+    log_error "CRITICAL: One or more QC jobs failed."
+    exit "$EXIT_CODE"
+fi
+
+log_info "All QC jobs finished successfully."
 
 # --- 모든 샘플 처리 후, Bracken 결과 통합 ---
 if [ "$QC_ONLY_MODE" = false ]; then
