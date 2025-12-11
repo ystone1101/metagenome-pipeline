@@ -446,6 +446,18 @@ if [ "$QC_ONLY_MODE" = false ]; then
     merge_bracken_outputs "$BRACKEN_OUT" "$BRACKEN_MERGED_OUT"
 fi
 
+if [[ -z "${DOKKAEBI_MASTER_COMMAND:-}" ]]; then
+    if [ -f "${PROJECT_ROOT_DIR}/lib/reporting_functions.sh" ]; then
+        log_info "Generating standalone Summary Report for QC/Taxonomy results..."
+        source "${PROJECT_ROOT_DIR}/lib/reporting_functions.sh"
+        if command -v create_summary_report &> /dev/null; then
+            # QC의 최종 출력 폴더를 사용 (P1_OUTPUT_DIR 대신 $BASE_DIR 사용)
+            create_summary_report "$BASE_DIR"
+            log_info "Summary report created at: ${BASE_DIR}/summary_report.html"
+        fi
+    fi
+fi
+
 # =================================================================
 # --- Pre-QC 및 Post-QC 별도 MultiQC 리포트 생성 ---
 # =================================================================

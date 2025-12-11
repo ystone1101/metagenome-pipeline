@@ -9,6 +9,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
+# 1. 상태 보고용 디렉토리 설정
+if [ -d "/dev/shm" ]; then export JOB_STATUS_DIR="/dev/shm/dokkaebi_status"; else export JOB_STATUS_DIR="/tmp/dokkaebi_status"; fi
+mkdir -p "$JOB_STATUS_DIR"
+
 # ==========================================================
 # --- 로깅(Logging) 및 오류 처리 함수 (최종 수정) ---
 # ==========================================================
@@ -395,10 +399,6 @@ check_for_new_input_files() {
 # ==========================================================
 # --- [Pro 3.4] Fixed-Height Dashboard Functions ---
 # ==========================================================
-
-# 1. 상태 보고용 디렉토리 설정
-if [ -d "/dev/shm" ]; then export JOB_STATUS_DIR="/dev/shm/dokkaebi_status"; else export JOB_STATUS_DIR="/tmp/dokkaebi_status"; fi
-mkdir -p "$JOB_STATUS_DIR"
 
 # 2. 상태 업데이트/삭제 함수
 set_job_status() { local sample=$1; local status=$2; echo "   ├─ [${sample}] ${status}" > "${JOB_STATUS_DIR}/${sample}.status"; }

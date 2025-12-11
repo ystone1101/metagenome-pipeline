@@ -85,11 +85,35 @@ run_kraken2_on_contigs() {
     # Checkpoint: 최종 리포트 파일 확인
     if [[ -f "$k2_report" ]]; then
         log_info "Kraken2 on contigs for ${sample_name} exists. Skipping."
-        return 0
-    fi
-    log_info "${sample_name}: Running Kraken2 on assembled contigs..."
-    conda run -n "$KRAKEN_ENV" kraken2 --db "$kraken_db" --threads "$threads" \
+
+    else
+        log_info "${sample_name}: Running Kraken2 on assembled contigs..."
+        conda run -n "$KRAKEN_ENV" kraken2 --db "$kraken_db" --threads "$threads" \
         --report "$k2_report" "$assembly_file" $extra_opts > "${kraken_out_dir}/${sample_name}_contigs.kraken2"
+    
+        log_info "${sample_name}: Kraken2 실행 완료."
+    f1
+
+    if [[ -f "$k2_report" ]]; then
+        log_info "${sample_name}: Contig 분류 통계 계산 중..."
+        # Contig (assembly file)의 총 개수를 센다 (총 서열 개수가 전체 Contig 수임)
+        local TOTAL_CONTIGS=$(grep -c "^>" "$assembly_file")
+        
+        # k2report에서 분류된 Contig 수를 추출
+        # k2report 파일의 헤더: C(Classified)와 U(Unclassified) 라인의 두 번째 필드 (Number of sequences)를 가져옴
+        local UNCLASSIFIED_CONTIGS=$(head -n 2 "$k2_report" | awk '{print $2}' | head -n 1) # Unclassified (첫 번째 라인)
+        local CLASSIFIED_CONTIGS=$(head -n 2 "$k2_report" | awk '{print $2}' | tail -n 1) # Classified (두 번째 라인)
+
+        # 퍼센트 계산
+        local PC_C=$(awk -v c=$CLASSIFIED_CONTIGS -v t=$TOTAL_CONTIGS 'BEGIN { if (t > 0) printf "%.2f", (c/t)*100; else printf "0.00" }')
+        local PC_U=$(awk -v u=$UNCLASSIFIED_CONTIGS -v t=$TOTAL_CONTIGS 'BEGIN { if (t > 0) printf "%.2f", (u/t)*100; else printf "0.00" }')
+
+        # Contig Summary TSV 파일에 추가
+        echo -e "${sample_name}\t${TOTAL_CONTIGS}\t${CLASSIFIED_CONTIGS}\t${PC_C}\t${UNCLASSIFIED_CONTIGS}\t${PC_U}" >> "$summary_tsv_file"
+        log_info "${sample_name}: Contig 분류 요약 파일에 추가 완료."
+    else
+        log_warn "${sample_name}: Kraken2 Contig 리포트가 없어 요약 파일 생성 스킵."
+    fi
 }
 
 #--- Bakta Annotation Function for Contigs (출력 경로 수정) ---

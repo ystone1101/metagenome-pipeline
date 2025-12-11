@@ -303,13 +303,13 @@ if [[ -n "$GTDBTK_DB_DIR_ARG" ]]; then
     export GTDBTK_DATA_PATH="$GTDBTK_DB_DIR_ARG"
 fi
 
-# --- 6. 설정 및 함수 파일 로드 ---
+# --- 5. 설정 및 함수 파일 로드 ---
 source "${PROJECT_ROOT_DIR}/config/pipeline_config.sh"
 source "${PROJECT_ROOT_DIR}/lib/pipeline_functions.sh"
 source "${PROJECT_ROOT_DIR}/config/mag_config.sh"
 source "${PROJECT_ROOT_DIR}/lib/mag_functions.sh"
 
-# --- 5. 디렉토리 및 로그 파일 설정 ---
+# --- 6. 디렉토리 및 로그 파일 설정 ---
 mkdir -p "$MAG_BASE_DIR" "$REPAIR_DIR" "$ASSEMBLY_DIR" "$ASSEMBLY_STATS_DIR" \
          "$KRAKEN_ON_CONTIGS_DIR" "$METAWRAP_DIR" \
          "$GTDBTK_ON_MAGS_DIR" "$BAKTA_ON_MAGS_DIR" "$TMP_DIR_ARG"
@@ -320,8 +320,12 @@ elif [[ "$ANNOTATION_TOOL" == "eggnog" ]]; then
     mkdir -p "$EGGNOG_ON_CONTIGS_DIR"
 fi
 
-EGGNOG_SUMMARY_CSV="${MAG_BASE_DIR}/eggnog_annotation_summary.csv"
+KRAKEN2_CONTIGS_SUMMARY_TSV="${MAG_BASE_DIR}/kraken2_contigs_summary.tsv"
+if [ ! -f "$KRAKEN2_CONTIGS_SUMMARY_TSV" ]; then 
+    echo -e "Sample\tTotal_Contigs\tClassified_Contigs\tClassified(%)\tUnclassified_Contigs\tUnclassified(%)" > "$KRAKEN2_CONTIGS_SUMMARY_TSV"
+fi
 
+EGGNOG_SUMMARY_CSV="${MAG_BASE_DIR}/eggnog_annotation_summary.csv"
 if [ ! -f "$EGGNOG_SUMMARY_CSV" ]; then
     echo "Sample_ID,Total_Genes,Annotated_Genes,Ratio(%),Status" > "$EGGNOG_SUMMARY_CSV"
 fi
@@ -474,7 +478,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
             if [ "$SKIP_CONTIG_ANALYSIS" = false ]; then
             set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
             KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
-            run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+            run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_CONTIGS_SUMMARY_TSV" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
             
                 if [ "$SKIP_ANNOTATION" = false ]; then
                     if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
@@ -650,4 +654,17 @@ done
 # --- 모든 작업이 성공적으로 끝나면, 새로운 상태를 공식 상태로 저장합니다. ---
 # mv "$STATE_FILE_NEW" "$STATE_FILE"
 log_info "Successfully updated MAG pipeline state."
+
+if [[ -z "${DOKKAEBI_MASTER_COMMAND:-}" ]]; then
+    if [ -f "${PROJECT_ROOT_DIR}/lib/reporting_functions.sh" ]; then
+        log_info "Generating standalone Summary Report for MAG Analysis results..."
+        source "${PROJECT_ROOT_DIR}/lib/reporting_functions.sh"
+        if command -v create_summary_report &> /dev/null; then
+            # MAG의 최종 출력 폴더를 사용
+            create_summary_report "$MAG_BASE_DIR"
+            log_info "Summary report created at: ${MAG_BASE_DIR}/summary_report.html"
+        fi
+    fi
+fi
+
 log_info "--- (Step 2) All samples processed successfully! ---"
