@@ -311,6 +311,18 @@ while true; do
         fi
     done
 
+    # ==============================================================================
+    # [1.2단계] 자가 치유 (Auto-Repair) :: QC/Taxonomy 누락분 즉시 복구 🚑
+    # ==============================================================================
+    # Phase 1 종료 후, MAG로 넘어가기 전에 누락된 Taxonomy 결과를 복구합니다.
+    if [ -f "${PROJECT_ROOT_DIR}/scripts/auto_repair.sh" ]; then
+        log_info "--- [Phase 1.2] Verifying Phase 1 Completeness & Auto-Repairing ---"
+        bash "${PROJECT_ROOT_DIR}/scripts/auto_repair.sh"
+    else
+        log_warn "Auto-repair script not found. Skipping repair."
+    fi
+
+
     # -------------------------------------------------------
     # [1.5단계] 안전장치: Pipeline 2 입력(Clean Reads) 검증
     # -------------------------------------------------------
