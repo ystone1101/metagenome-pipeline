@@ -18,23 +18,56 @@ RED='\033[1;31m'  # 밝은 빨강
 GRAY='\033[1;30m'
 NC='\033[0m'
 
+# ==============================================================================
+# ✨ [NEW] 스타일리시한 진행바 그리기 함수
+# ==============================================================================
 draw_bar() {
     local current=$1
     local total=$2
-    local width=30
+    local width=30  # 바의 길이 (취향껏 조절 가능: 20~50 추천)
+
+    # 0으로 나누기 방지 및 퍼센트 계산
     if [ "$total" -le 0 ]; then total=1; fi
     local percent=$(( (current * 100) / total ))
     if [ "$percent" -gt 100 ]; then percent=100; fi
+
+    # 채워질 블록 개수 계산
     local num_full=$(( (current * width) / total ))
-    local bar="["
-    for ((i=0; i<num_full; i++)); do bar+="="; done
-    for ((i=num_full; i<width; i++)); do bar+="."; done
-    bar+="]"
-    local color=$YELLOW
-    if [ "$percent" -eq 100 ]; then color=$GREEN; fi
-    if [ "$percent" -eq 0 ]; then color=$RED; fi
-    if [ "$percent" -gt 0 ] && [ "$percent" -lt 100 ]; then color=$YELLOW; fi
-    echo -e "${color}${bar} ${percent}% (${current}/${total})${NC}"
+    
+    # --- 스타일 설정 (여기서 모양을 바꿀 수 있어요!) ---
+    local full_char="█"    # 꽉 찬 블록 문자
+    local empty_char="▒"   # 빈 블록 문자 (또는 '░', '─' 등)
+    
+    # 색상 설정 (기본: 초록색 / 완료 시: 파란색 / 0%: 회색)
+    local bar_color="$GREEN"
+    local text_color="$CYAN"
+    local end_emoji=""
+
+    if [ "$percent" -eq 100 ]; then
+        bar_color="$BLUE"      # 100% 달성 시 색상 변경
+        text_color="$GREEN"
+        end_emoji=" 🎉"        # 축하 이모지 추가
+    elif [ "$percent" -eq 0 ]; then
+        bar_color="$GRAY"      # 0% 일 때 색상
+    fi
+
+    # --- 그리기 시작 (printf 사용으로 정교한 제어) ---
+    # 1. 여는 괄호
+    printf "${GRAY}[${NC}"
+    
+    # 2. 꽉 찬 부분 그리기 (색상 적용)
+    printf "%b" "$bar_color"
+    for ((i=0; i<num_full; i++)); do printf "%s" "$full_char"; done
+    
+    # 3. 빈 부분 그리기 (회색 적용)
+    printf "%b" "$GRAY"
+    for ((i=num_full; i<width; i++)); do printf "%s" "$empty_char"; done
+    
+    # 4. 닫는 괄호 및 색상 초기화
+    printf "%b${GRAY}]${NC} " "$NC"
+
+    # 5. 퍼센트 및 정보 출력 (오른쪽 정렬로 깔끔하게)
+    printf "%b%3d%% (%d/%d)%b%s\n" "$text_color" "$percent" "$current" "$total" "$NC" "$end_emoji"
 }
 
 # ==============================================================================
