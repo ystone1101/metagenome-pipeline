@@ -19,6 +19,7 @@ fi
 FULL_COMMAND_MAG="$0 \"$@\""
 
 shopt -s nullglob
+set -m
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 PROJECT_ROOT_DIR=$(dirname "$SCRIPT_DIR")
@@ -65,7 +66,9 @@ print_usage() {
     echo "  --input_dir PATH         - (Required) Path to the input directory containing QC'd reads."
     echo "  --output_dir PATH        - Path to the main output directory. (Default: creates 'MAG_analysis' inside the input directory)"    
     echo "  --threads INT            - Number of threads to use. (Default: 6)"
-    echo "  --memory_gb GB              - Max memory in Gigabytes for MEGAHIT. (Default: 60)"
+    echo "  --memory_gb GB           - Max memory in Gigabytes for MEGAHIT. (Default: 60)"
+    echo "  --parallel-jobs INT      - Number of parallel MAG jobs (Default: 1)"
+    echo "                             (Light steps run in parallel, Heavy steps run sequentially)"
     echo "  --min_contig_len INT     - Minimum contig length for assembly. (Default: 1000)"
     echo "  --min_completeness INT   - Minimum completeness for refined bins. (Default: 50)"
     echo "  --max_contamination INT  - Maximum contamination for refined bins. (Default: 10)"
@@ -113,6 +116,7 @@ RAW_INPUT_DIR=""
 OUTPUT_DIR_ARG=""
 THREADS=6
 MEMORY_GB=60
+PARALLEL_JOBS=1
 MIN_CONTIG_LEN=1000
 MIN_COMPLETENESS=50
 MAX_CONTAMINATION=10
@@ -146,6 +150,7 @@ while [ $# -gt 0 ]; do
         --output_dir) OUTPUT_DIR_ARG="${2%/}"; shift 2 ;;        
         --threads) THREADS="$2"; shift 2 ;;
         --memory_gb) MEMORY_GB="$2"; shift 2 ;;
+        --parallel-jobs) PARALLEL_JOBS="$2"; shift 2 ;;
         --preset) MEGAHIT_PRESET_TO_USE="$2"; shift 2 ;;
         --gtdbtk_db_dir) GTDBTK_DB_DIR_ARG="$2"; shift 2 ;;
         --bakta_db_dir) BAKTA_DB_DIR_ARG="$2"; shift 2 ;;
@@ -384,6 +389,36 @@ log_info "All dependencies are satisfied."
 # fi
 # log_info "Input file changes detected. Proceeding with MAG analysis..."
 
+# ==============================================================================
+# [추가] 자원 분배 계산 및 스마트 락 설정 (여기부터)
+# ==============================================================================
+if [[ "$PARALLEL_JOBS" -gt 1 ]]; then
+    MAX_MAG_JOBS="$PARALLEL_JOBS"
+    
+    # 스레드 나누기
+    THREADS_PER_JOB=$(( THREADS / PARALLEL_JOBS ))
+    if [[ "$THREADS_PER_JOB" -lt 1 ]]; then THREADS_PER_JOB=1; fi
+    
+    # 메모리 나누기
+    MEMORY_GB_PER_JOB=$(( MEMORY_GB / PARALLEL_JOBS ))
+    if [[ "$MEMORY_GB_PER_JOB" -lt 1 ]]; then MEMORY_GB_PER_JOB=1; fi
+    
+    log_info "⚡ Auto-Scaling: $MAX_MAG_JOBS parallel jobs (Per job: $THREADS_PER_JOB threads, $MEMORY_GB_PER_JOB GB RAM)"
+else
+    MAX_MAG_JOBS=1
+    THREADS_PER_JOB="$THREADS"
+    MEMORY_GB_PER_JOB="$MEMORY_GB"
+    log_info "⚡ Single Job Mode: Using full resources per job."
+fi
+
+# [추가] 스마트 락 디렉토리 설정
+LOCK_DIR="${MAG_BASE_DIR}/locks"
+mkdir -p "$LOCK_DIR"
+HEAVY_JOB_LOCK="${LOCK_DIR}/heavy_resource.lock"
+
+# [★ 여기 추가!] 혹시 이전 실행 실패로 남아있을지 모르는 락 파일 제거 (초기화)
+rm -f "$HEAVY_JOB_LOCK"
+
 # --- 9. 메인 루프 시작 ---
 log_info "--- (Step 2) Starting Per-Sample MAG Analysis (Mode: ${RUN_MODE}) ---"
 if [ -z "$(ls -A "${QC_READS_DIR}"/*_1.fastq.gz 2>/dev/null)" ]; then
@@ -391,6 +426,12 @@ if [ -z "$(ls -A "${QC_READS_DIR}"/*_1.fastq.gz 2>/dev/null)" ]; then
 #    rm -f "$STATE_FILE_NEW"
     exit 0
 fi
+
+# ==============================================================================
+# [수정 1단계] 재시작 신호용 파일 정의 (비상벨 초기화)
+# ==============================================================================
+RESTART_SIGNAL_FILE="${MAG_BASE_DIR}/.restart_required"
+rm -f "$RESTART_SIGNAL_FILE" # 기존에 남아있을지 모르는 신호 제거
 
 # [상태 파일 초기화]
 if [ -d "/dev/shm" ]; then STATUS_DIR="/dev/shm/dokkaebi_status"; else STATUS_DIR="/tmp/dokkaebi_status"; fi
@@ -401,6 +442,28 @@ TOTAL_SAMPLES=$(find "${QC_READS_DIR}" -maxdepth 1 -name "*_1.fastq.gz" | wc -l)
 CURRENT_PROGRESS=0
 
 for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
+
+    # [추가] 다른 작업에서 재시작 신호를 보냈는지 확인
+    if [ -f "$RESTART_SIGNAL_FILE" ]; then
+        log_warn "Restart signal detected. Stopping new job submission."
+        break
+    fi
+
+    # [1. 대기열 관리] 설정한 작업 수만큼만 동시에 실행되도록 대기
+    while [ $(jobs -r | wc -l) -ge "$MAX_MAG_JOBS" ]; do
+        if [ -f "$RESTART_SIGNAL_FILE" ]; then
+            log_warn "Restart signal detected while waiting for slots."
+            break 2 # while 루프와 바깥의 for 루프까지 한 번에 탈출!
+        fi
+        sleep 10
+    done
+
+    # [2. 서브쉘 시작] 여기서부터 병렬 작업 시작! (괄호 열기)
+    (
+        # 자원 변수 덮어쓰기 (중요: 이 내부에서만 적용됨)
+        THREADS="$THREADS_PER_JOB"
+        MEMORY_GB="$MEMORY_GB_PER_JOB"
+
 #    if [[ ! -f "$R1_QC_GZ" ]]; then continue; fi
     # --- 샘플 정보 설정 ---
     # SAMPLE_BASE=$(basename "$R1_QC_GZ")
@@ -476,10 +539,14 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
             log_warn "Assembly file not found for ${SAMPLE}. Skipping contig-level post-analysis."
         else
             if [ "$SKIP_CONTIG_ANALYSIS" = false ]; then
-            set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
-            KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
-            run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_CONTIGS_SUMMARY_TSV" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
-            
+                set_job_status "$SAMPLE" "Waiting for Kraken2 Slot..."
+                (
+                    flock 9
+                    set_job_status "$SAMPLE" "Running Kraken2 on Contigs..." 
+                    KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
+                    run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_CONTIGS_SUMMARY_TSV" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                ) 9>"$HEAVY_JOB_LOCK"
+
                 if [ "$SKIP_ANNOTATION" = false ]; then
                     if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
                         set_job_status "$SAMPLE" "Running Bakta on Contigs..."
@@ -504,8 +571,14 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
             log_warn "Final MAGs not found for ${SAMPLE}. Skipping MAG-level post-analysis."
         else
             GTDBTK_OUT_DIR_SAMPLE="${GTDBTK_ON_MAGS_DIR}/${SAMPLE}"; mkdir -p "$GTDBTK_OUT_DIR_SAMPLE"
-            run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS"
-            
+
+            set_job_status "$SAMPLE" "Waiting for GTDB-Tk Slot..."
+            (
+                flock 9    
+                set_job_status "$SAMPLE" "Running GTDB-Tk..."
+                run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS"
+            ) 9>"$HEAVY_JOB_LOCK"
+
             BAKTA_MAGS_OUT_DIR_SAMPLE="${BAKTA_ON_MAGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_MAGS_OUT_DIR_SAMPLE"
             run_bakta_for_mags "$SAMPLE" "$FINAL_BINS_DIR" "$BAKTA_MAGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
         fi
@@ -535,9 +608,14 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
             if [ -f "$ASSEMBLY_SUCCESS_FLAG" ]; then
                 echo "[INFO] Assembly done for ${SAMPLE}" >> "$LOG_FILE"
             else
-                set_job_status "$SAMPLE" "Running Assembly (MEGAHIT)..."
-                run_megahit "$SAMPLE" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "$ASSEMBLY_OUT_DIR_SAMPLE" "$MEGAHIT_PRESET_TO_USE" "$MEMORY_GB" "$MIN_CONTIG_LEN" "$THREADS" "$MEGAHIT_EXTRA_OPTS"
-                if [ $? -eq 0 ]; then touch "$ASSEMBLY_SUCCESS_FLAG"; else log_warn "Assembly for ${SAMPLE} failed."; continue; fi
+                set_job_status "$SAMPLE" "Waiting for Assembly Solt..."
+                (
+                    flock 9
+                    set_job_status "$SAMPLE" "Running Assembly (MEGAHIT)..."
+                    run_megahit "$SAMPLE" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "$ASSEMBLY_OUT_DIR_SAMPLE" "$MEGAHIT_PRESET_TO_USE" "$MEMORY_GB" "$MIN_CONTIG_LEN" "$THREADS" "$MEGAHIT_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                ) 9>"$HEAVY_JOB_LOCK"
+                 
+                if [ $? -eq 0 ]; then touch "$ASSEMBLY_SUCCESS_FLAG"; else log_warn "Assembly for ${SAMPLE} failed."; exit 1; fi
             fi
             
             # Assembly 성공 여부와 관계없이 후속 분석 실행 (내부에서 파일 존재 여부 확인)
@@ -553,10 +631,14 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
 
                     if [ "$SKIP_CONTIG_ANALYSIS" = false ]; then
                         # 1. Kraken2 (Taxonomy) - 항상 실행
-                        set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
-                        KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
-                        run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
-
+                        set_job_status "$SAMPLE" "Waiting for Kraken2 Slot..."
+                        (
+                            flock 9
+                            set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
+                            KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
+                            run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                        ) 9>"$HEAVY_JOB_LOCK"
+                            
                         # 2. Annotation (Functional) - 선택적 실행
                         if [ "$SKIP_ANNOTATION" = false ]; then
                             if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
@@ -608,8 +690,13 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                     echo "[INFO] GTDB-Tk done for ${SAMPLE}" >> "$LOG_FILE"
                 else
                     if [ -f "$BINNING_SUCCESS_FLAG" ]; then
-                    set_job_status "$SAMPLE" "Running GTDB-Tk..."
-                        run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                        set_job_status "$SAMPLE" "Waiting for GTDB-Tk Slot..."
+                        (
+                            flock 9
+                            set_job_status "$SAMPLE" "Running GTDB-Tk..."
+                            run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                        ) 9>"$HEAVY_JOB_LOCK"
+
                         if [[ -f "$GTDBTK_SUMMARY_FILE_BAC" || -f "$GTDBTK_SUMMARY_FILE_AR" ]]; then touch "$GTDBTK_SUCCESS_FLAG"; else log_warn "GTDB-Tk for ${SAMPLE} failed."; fi
                     fi
                 fi
@@ -645,11 +732,25 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         else
             # 99 코드가 반환됨 -> 즉시 루프 중단 후 마스터 스크립트로 신호 전달
             log_info "New input detected during MAG run. SIGNALLING MASTER to re-run QC."
+            touch "$RESTART_SIGNAL_FILE"
             exit 99 
         fi
     fi
 
+    ) &
+
 done
+
+log_info "Waiting for all parallel MAG jobs to finish..."
+wait
+log_info "All MAG parallel jobs finished."
+
+# [추가] 재시작 신호가 있었는지 확인하고 최종 종료 코드 결정
+if [ -f "$RESTART_SIGNAL_FILE" ]; then
+    log_warn "Restart required signal was caught. Exiting with code 99."
+    rm -f "$RESTART_SIGNAL_FILE"
+    exit 99
+fi
 
 # --- 모든 작업이 성공적으로 끝나면, 새로운 상태를 공식 상태로 저장합니다. ---
 # mv "$STATE_FILE_NEW" "$STATE_FILE"

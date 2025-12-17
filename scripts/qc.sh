@@ -17,6 +17,7 @@ fi
 FULL_COMMAND_QC="$0 \"$@\""
 
 shopt -s nullglob
+set -m
 
 # 스크립트의 위치를 기준으로 프로젝트 최상위 폴더 경로를 찾습니다.
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
@@ -64,6 +65,8 @@ print_usage() {
     echo -e "${CYAN}${BOLD}Optional Options:${NC}"
     echo "  --threads INT         - Number of threads for all tools. (Default: 6)"
     echo "  --memory MB           - Max memory in Megabytes for KneadData (e.g., 80000). (Default: 60000)"
+    echo "  --parallel-jobs INT   - Number of parallel QC jobs (Default: 1)"
+    echo "                          (Threads & Memory will be split per job)"
     echo "  --qc-only             - Run only QC (KneadData/fastp) and skip taxonomic analysis."
     echo "  --verbose             - Show detailed logs in terminal instead of progress bar."    
     echo ""
@@ -88,7 +91,7 @@ if [[ "$MODE" != "host" && "$MODE" != "environmental" ]]; then
 fi
 
 INPUT_DIR_ARG=""; OUTPUT_DIR_ARG=""; KRAKEN2_DB_ARG=""; HOST_DB_ARG="";
-THREADS=6; MEMORY_MB="60000";
+THREADS=6; MEMORY_MB="60000"; PARALLEL_JOBS=1
 QC_ONLY_MODE=false 
 KNEADDATA_EXTRA_OPTS=""
 FASTP_EXTRA_OPTS=""
@@ -102,6 +105,7 @@ while [ $# -gt 0 ]; do
         --host_db) HOST_DB_ARG="$2"; shift 2 ;;
         --threads) THREADS="$2"; shift 2 ;;
         --memory) MEMORY_MB="${2}m"; shift 2 ;;
+        --parallel-jobs) PARALLEL_JOBS="$2"; shift 2 ;;
         --kneaddata-opts) KNEADDATA_EXTRA_OPTS="$2"; shift 2 ;;
         --fastp-opts) FASTP_EXTRA_OPTS="$2"; shift 2 ;;
         --kraken2-opts) KRAKEN2_EXTRA_OPTS="$2"; shift 2 ;;
@@ -168,36 +172,50 @@ check_conda_dependency "$KNEADDATA_ENV" "multiqc"
 log_info "모든 소프트웨어 의존성 확인 완료."
 
 # --- 8. 샘플별 루프 (KneadData 병렬 + Kraken2 순차 하이브리드 적용) ---
-# [설정] 슬롯 개수 정의
-# MAX_KNEAD_JOBS=2   # KneadData 동시 실행 수
-# MAX_KRAKEN_JOBS=1  # Kraken2 동시 실행 수 (메모리 보호)
+if [[ "$PARALLEL_JOBS" -gt 1 ]]; then
+    # 1. 병렬 모드: 전체 자원을 N등분
+    MAX_KNEAD_JOBS="$PARALLEL_JOBS"
 
-# KneadData 하나가 원활하게 돌기 위한 권장 스레드 수
-RECOMMENDED_THREADS_PER_JOB=8
+    # 대기열 관리용 변수 설정 
+    MAX_PENDING_JOBS="$PARALLEL_JOBS"
 
-# 스레드 계산 (KneadData용)
-# THREADS_PER_JOB=$(( THREADS / MAX_KNEAD_JOBS ))
+    # 스레드 나누기
+    THREADS_PER_JOB=$(( THREADS / PARALLEL_JOBS ))
+    if [[ "$THREADS_PER_JOB" -lt 1 ]]; then THREADS_PER_JOB=1; fi
+    
+    # 메모리 나누기 (입력된 "60000m"에서 'm' 떼고 계산)
+    MEM_VAL=${MEMORY_MB%m} 
+    MEMORY_MB_PER_JOB=$(( MEM_VAL / PARALLEL_JOBS ))
+    
+    log_info "⚡ Auto-Scaling Enabled: $PARALLEL_JOBS jobs x $THREADS_PER_JOB threads x $MEMORY_MB_PER_JOB MB RAM"
+else
+    # 2. 순차 모드 (기본값): 전체 자원 몰아주기
+    MAX_KNEAD_JOBS=1
+    MAX_PENDING_JOBS=1 # [수정] 기본값 설정
+    THREADS_PER_JOB="$THREADS"
+    MEMORY_MB_PER_JOB="${MEMORY_MB%m}"
+    
+    log_info "⚡ Single Job Mode: Using full resources ($THREADS threads, $MEMORY_MB_PER_JOB MB RAM)"
+fi
 
-MAX_KNEAD_JOBS=$(( THREADS / RECOMMENDED_THREADS_PER_JOB ))
-if [[ "$MAX_KNEAD_JOBS" -lt 1 ]]; then MAX_KNEAD_JOBS=1; fi
-
+# Kraken2는 메모리를 많이 쓰므로 안전하게 1개씩 실행 (병렬 처리 시 OOM 위험)
 MAX_KRAKEN_JOBS=1
-MAX_PENDING_JOBS=20 # 대기열 제한 
-
-THREADS_PER_JOB=$(( THREADS / MAX_KNEAD_JOBS ))
-# if (( THREADS_PER_JOB < 1 )); then THREADS_PER_JOB=1; fi # [기존 코드 주석 처리] (위에서 보장됨)
-
-log_info "Dynamic Resource Allocation: Running $MAX_KNEAD_JOBS jobs in parallel ($THREADS_PER_JOB threads each)."
 
 # 잠금 파일 저장할 임시 폴더 생성
 LOCK_DIR="${WORK_DIR}/locks"
 mkdir -p "$LOCK_DIR"
-# KneadData용 슬롯 파일 생성 (1~4번)
-for ((i=1; i<=MAX_KNEAD_JOBS; i++)); do touch "${LOCK_DIR}/knead_slot_${i}"; done
+
+# 기존에 남아있을지 모르는 슬롯 파일 제거 (초기화)
+rm -f "${LOCK_DIR}"/knead_slot_*
+
+# 계산된 작업 수만큼 슬롯 파일 생성 (입장권 만들기)
+for ((i=1; i<=MAX_KNEAD_JOBS; i++)); do 
+    touch "${LOCK_DIR}/knead_slot_${i}"
+done
 
 log_info "Starting Pipeline Loop..."
-#log_info "Strategy: KneadData ($MAX_KNEAD_JOBS parallel) -> Release -> Kraken2 ($MAX_KRAKEN_JOBS serial)"
 
+# 상태 모니터링용 폴더 설정
 if [ -d "/dev/shm" ]; then STATUS_DIR="/dev/shm/dokkaebi_status"; else STATUS_DIR="/tmp/dokkaebi_status"; fi
 rm -f "${STATUS_DIR}"/*.status
 
@@ -276,7 +294,15 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
             set_job_status "$SAMPLE" "Waiting for QC slot..."
 
             log_info "${SAMPLE}: 신규 QC 분석을 시작합니다."
-
+            
+            # [신규 추가] 신호등 (Traffic Light) - Kraken2 실행 중이면 QC 대기
+            # kraken_lock을 누가 잡고 있으면(flock -x) 여기서 무한 대기함
+            # 이 코드가 있어야 'CPU/메모리 폭발'로 인한 결과 누락을 방지함
+            (
+                flock -x 200
+            ) 200>"${LOCK_DIR}/kraken_lock"
+            
+            # 슬롯 확보 (동시 실행 개수 제한)
             MY_QC_SLOT=""
             while true; do
                 for ((i=1; i<=MAX_KNEAD_JOBS; i++)); do
@@ -288,21 +314,17 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
             done
 
             log_info "  [KneadData START] $SAMPLE (Slot #$MY_QC_SLOT)"
-                        
-            (
-                flock -x 200
-                # 락을 얻었다는 건, 현재 Kraken2를 돌리는 애가 없다는 뜻!
-            ) 200>"${LOCK_DIR}/kraken_lock"
-            
-            #cleaned_files_str="" # 결과 경로를 담을 변수 초기화
-            
+                       
+            #cleaned_files_str="" # 결과 경로를 담을 변수 초기화           
             if [[ "$MODE" == "host" ]]; then
                 set_job_status "$SAMPLE" "Running KneadData (QC)..."
+
                 # KneadData에 사용할 스레드 수를 계산합니다. (입력된 스레드의 절반, 최소 1개 보장)
                 #KNEADDATA_THREADS=$((THREADS / 2))
                 #if (( KNEADDATA_THREADS < 1 )); then
                 #KNEADDATA_THREADS=$((THREADS_PER_JOB / 1.5))
                 #if (( KNEADDATA_THREADS < 1 )); then KNEADDATA_THREADS=1; fi
+                
                 KNEADDATA_THREADS="$THREADS_PER_JOB"
                 if [[ "$KNEADDATA_THREADS" -lt 1 ]]; then KNEADDATA_THREADS=1; fi
                 #log_info "Allocating ${KNEADDATA_THREADS} threads to KneadData (half of the requested ${THREADS})."
@@ -319,7 +341,7 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
                 run_kneaddata "$SAMPLE" "$r1_uncompressed" "$r2_uncompressed" \
                     "$HOST_DB_ARG" "$WORK_DIR" "$CLEAN_DIR" "$KNEADDATA_LOG" \
                     "$FASTQC_PRE_QC_DIR" "$FASTQC_POST_QC_DIR" \
-                    "$KNEADDATA_THREADS" "1" "${MEMORY_MB}" "$TRIMMOMATIC_OPTIONS" \
+                    "$KNEADDATA_THREADS" "1" "${MEMORY_MB_PER_JOB}m" "$TRIMMOMATIC_OPTIONS" \
                     "$KNEADDATA_EXTRA_OPTS" > /dev/null
 
                 rm "$r1_uncompressed" "$r2_uncompressed"
@@ -395,7 +417,7 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
             log_info "  [Kraken2 START] $SAMPLE (Serial)"
             
             # [수정] Kraken2 실행 (혼자 도니까 전체 $THREADS 사용 가능)
-            run_kraken2 "$SAMPLE" "$r1_for_kraken2" "$r2_for_kraken2" "$KRAKEN2_DB_ARG" "$KRAKEN_OUT" "$KRAKEN2_SUMMARY_TSV" "$THREADS" "$KRAKEN2_EXTRA_OPTS"
+            run_kraken2 "$SAMPLE" "$r1_for_kraken2" "$r2_for_kraken2" "$KRAKEN2_DB_ARG" "$KRAKEN_OUT" "$KRAKEN2_SUMMARY_TSV" "$THREADS_PER_JOB" "$KRAKEN2_EXTRA_OPTS"
             touch "$KRAKEN2_SUCCESS_FLAG"
             
             log_info "  [Kraken2 DONE] $SAMPLE"

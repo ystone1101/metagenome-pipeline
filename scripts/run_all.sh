@@ -87,32 +87,34 @@ print_usage() {
     echo -e "  ${GREEN}environmental${NC} - For environmental samples (uses fastp for QC)."
     echo ""
     echo -e "${CYAN}${BOLD}Required Options:${NC}"
-    echo "  --input_dir PATH        Input directory containing raw FASTQ files"
-    echo "  --output_dir PATH       Main output directory"
-    echo "  --kraken2_db PATH       Kraken2 database path"
-    echo "  --gtdbtk_db PATH        GTDB-Tk database path"
-    echo "  --bakta_db PATH         Bakta database path (Required if using Bakta)"
-    echo "  --eggnog_db PATH        EggNOG database path (Required if using EggNOG)"
-    echo "  --host_db PATH          Host reference database (Required for 'host' mode)"
+    echo "  --input_dir PATH        - Input directory containing raw FASTQ files"
+    echo "  --output_dir PATH       - Main output directory"
+    echo "  --kraken2_db PATH       - Kraken2 database path"
+    echo "  --gtdbtk_db PATH        - GTDB-Tk database path"
+    echo "  --bakta_db PATH         - Bakta database path (Required if using Bakta)"
+    echo "  --eggnog_db PATH        - EggNOG database path (Required if using EggNOG)"
+    echo "  --host_db PATH          - Host reference database (Required for 'host' mode)"
     echo ""
     echo -e "${CYAN}${BOLD}Optional Options:${NC}"
     echo "  --threads INT         - Number of threads for all tools. (Default: 6)"
     echo "  --memory_gb INT       - Max memory in Gigabytes for KneadData and MEGAHIT. (Default: 60)"
-    echo "  --annotation-tool STR   Tool for MAG annotation: 'eggnog' (default) or 'bakta'"
-    echo "  --skip-contig-analysis   - Skip Kraken2/Annotation analysis on assembled contigs."    
-    echo "  --skip-annotation             - Skip ONLY Functional Annotation (Bakta/EggNOG) analysis on contigs."
+    echo "  --parallel-jobs N     - Number of samples to process in parallel (Default: 1)"
+    echo "                        (Resources will be divided by N automatically)"
+    echo "  --annotation-tool STR   - Tool for MAG annotation: 'eggnog' (default) or 'bakta'"
+    echo "  --skip-contig-analysis  - Skip Kraken2/Annotation analysis on assembled contigs."    
+    echo "  --skip-annotation       - Skip ONLY Functional Annotation (Bakta/EggNOG) analysis on contigs."
     echo "  --verbose             - Show detailed logs in terminal instead of progress bar."
     echo ""
     echo -e "${CYAN}Tool-specific Options (Pass-through):${NC}"
-    echo "  --kneaddata-opts STR           Pass options to KneadData (in quotes)"
-    echo "  --fastp-opts STR               Pass options to fastp (in quotes)"
-    echo "  --kraken2-opts STR             Pass options to Kraken2 (in quotes)"
-    echo "  --megahit-opts STR             Pass options to MEGAHIT (in quotes)"
-    echo "  --metawrap-binning-opts STR    Pass options to MetaWRAP Binning"
-    echo "  --metawrap-refinement-opts STR Pass options to MetaWRAP Refinement"
-    echo "  --gtdbtk-opts STR              Pass options to GTDB-Tk (in quotes)"
-    echo "  --bakta-opts STR               Pass options to Bakta (in quotes)"
-    echo "  --eggnog-opts STR              Pass options to EggNOG-mapper (in quotes)"
+    echo "  --kneaddata-opts STR           - Pass options to KneadData (in quotes)"
+    echo "  --fastp-opts STR               - Pass options to fastp (in quotes)"
+    echo "  --kraken2-opts STR             - Pass options to Kraken2 (in quotes)"
+    echo "  --megahit-opts STR             - Pass options to MEGAHIT (in quotes)"
+    echo "  --metawrap-binning-opts STR    - Pass options to MetaWRAP Binning"
+    echo "  --metawrap-refinement-opts STR - Pass options to MetaWRAP Refinement"
+    echo "  --gtdbtk-opts STR              - Pass options to GTDB-Tk (in quotes)"
+    echo "  --bakta-opts STR               - Pass options to Bakta (in quotes)"
+    echo "  --eggnog-opts STR              - Pass options to EggNOG-mapper (in quotes)"
     echo ""
     echo "  -h, --help            - Display this help message and exit."
     echo ""    
@@ -140,7 +142,7 @@ fi
 
 # 변수 초기화
 INPUT_DIR=""; OUTPUT_DIR=""; KRAKEN2_DB=""; GTDBTK_DB=""; BAKTA_DB=""; HOST_DB="";
-THREADS=6; MEMORY_GB="60"
+THREADS=6; MEMORY_GB="60"; PARALLEL_JOBS=1
 # 모든 도구별 추가 옵션을 저장할 변수 초기화
 KNEADDATA_OPTS=""; FASTP_OPTS=""; KRAKEN2_OPTS=""; MEGAHIT_OPTS=""; METAWRAP_BINNING_OPTS=""
 METAWRAP_REFINEMENT_OPTS=""; GTDBTK_OPTS=""; BAKTA_OPTS=""; EGGNOG_OPTS=""
@@ -159,6 +161,7 @@ while [ $# -gt 0 ]; do
         --host_db) HOST_DB="$2"; shift 2 ;;
         --threads) THREADS="$2"; shift 2 ;;
         --memory_gb) MEMORY_GB="$2"; shift 2 ;;
+        --parallel-jobs) PARALLEL_JOBS="$2"; shift 2 ;;
         --kneaddata-opts) KNEADDATA_OPTS="$2"; shift 2 ;;
         --fastp-opts) FASTP_OPTS="$2"; shift 2 ;;
         --kraken2-opts) KRAKEN2_OPTS="$2"; shift 2 ;;
@@ -236,7 +239,7 @@ while true; do
         if [ "$LOG_SIZE" -gt 10240 ]; then # 10MB (10240KB)
             TIMESTAMP=$(date +%Y%m%d_%H%M%S)
             mv "$LOG_FILE" "${LOG_FILE}.${TIMESTAMP}.bak"
-            gzip "${LOG_FILE}.${TIMESTAMP}.bak" & # 백그라운드 압축
+            gzip "${LOG_FILE}.${TIMESTAMP}.bak" # 백그라운드 압축
             touch "$LOG_FILE"
             log_info "Log file rotated due to size limit (>10MB)."
         fi
@@ -255,6 +258,7 @@ while true; do
             bash "${PROJECT_ROOT_DIR}/scripts/qc.sh"
             "${P1_MODE}" --input_dir "${INPUT_DIR}" --output_dir "${P1_OUTPUT_DIR}"
             --kraken2_db "${KRAKEN2_DB}" --threads "${THREADS}"
+            --parallel-jobs "${PARALLEL_JOBS}"
         )
         if [[ "$P1_MODE" == "host" ]]; then
             P1_MEMORY_MB=$((MEMORY_GB * 1024))
@@ -419,6 +423,7 @@ while true; do
             --raw_input_dir "${INPUT_DIR}"
             --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}"
             --threads "${THREADS}" --memory_gb "${MEMORY_GB}"
+            --parallel-jobs "${PARALLEL_JOBS}"
         )
 
         if [ "$SKIP_CONTIG_ANALYSIS" = true ]; then
