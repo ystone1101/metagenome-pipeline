@@ -56,7 +56,9 @@ try:
     # 1. QC Status (다크 배경 유지, 겹침 해결)
     if os.path.exists(qc_file):
         df = pd.read_csv(qc_file)
-        notes = df['QC_Note'].fillna("").astype(str).str.lower()
+        notes = df['QC_Note'].fillna("").astype(str).str.replace(r'\([^)]*\)', '', regex=True)
+        notes = notes.str.replace(r'[;,]', ' ', regex=True).str.lower()
+
         fig, axes = plt.subplots(2, 2, figsize=(12, 6), facecolor=COLOR_BG_DARK)
         draw_gauge(axes[0,0], "Pass", notes.str.contains('pass').sum(), global_total, COLOR_PASS)
         draw_gauge(axes[0,1], "Low Paired", notes.str.contains('low paired').sum(), global_total, COLOR_WARN)
@@ -195,7 +197,7 @@ while true; do
         .card { background-color: #1e1e1e; border: 1px solid #333; height: 100%; display: flex; flex-direction: column; }
         .card-body { flex: 1; }
         /* 이미지 영역 최적화 (높이 자동 조절) */
-        .plot-container { height: 100%; min-height: 500px; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; padding: 0; background-color: #1e1e1e; }
+        .plot-container { height: 100%; min-height: 400px; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; padding: 0; background-color: #1e1e1e; }
         .plot-img { max-width: 95%; max-height: 95%; height: auto; width: auto; object-fit: contain; margin: auto; }
         .nav-tabs .nav-link { color: #aaa; border: none; }
         .nav-tabs .nav-link.active { color: #00e676; background: none; border-bottom: 3px solid #00e676; font-weight: bold; }
@@ -217,7 +219,7 @@ while true; do
                 <div class="card border-secondary shadow-sm h-100">
                     <div class="card-header bg-dark py-2 small fw-bold text-neon text-uppercase">Analysis Progress Overview</div>
                     <div class="card-body pt-3">
-                        <h6 class="text-secondary mb-2">STEP 1: QUALITY CHECK & CLASSIFICATION</h6>
+                        <h6 class="text-secondary mt-3 mb-2">STEP 1: QUALITY CHECK & CLASSIFICATION</h6>
                         <div class="mb-4">
                             <div class="d-flex justify-content-between small fw-bold mb-1"><span>1️⃣ Reads QC</span><span class="text-neon">$PCT_QC%</span></div>
                             <div class="progress mb-2"><div class="progress-bar bg-neon progress-bar-striped progress-bar-animated" style="width: $PCT_QC%">$COUNT_QC / $TOTAL_SAMPLES</div></div>
@@ -228,7 +230,7 @@ while true; do
                             <div class="progress mb-2"><div class="progress-bar bg-neon progress-bar-striped progress-bar-animated" style="width: $PCT_TAX%">$COUNT_TAX / $TOTAL_SAMPLES</div></div>
                             $(if [ -n "$IS_TAX_RUNNING" ]; then echo "<span class='badge bg-primary px-3 py-2'>RUNNING</span>"; elif [ "$STALLED_COUNT" -gt 0 ]; then echo "<span class='badge bg-danger px-3 py-2'>STALLED ($STALLED_COUNT)</span>"; else echo "<span class='badge bg-secondary px-3 py-2'>IDLE</span>"; fi)
                         </div>
-                        <h6 class="text-secondary pt-3 mt-4 mb-2 border-top border-secondary">STEP 2: ASSEMBLY & ANNOTATION</h6>
+                        <h6 class="text-secondary pt-4 mt-4 mb-2 border-top border-secondary">STEP 2: ASSEMBLY & ANNOTATION</h6>
                         <div class="mb-4">
                             <div class="d-flex justify-content-between small fw-bold mb-1"><span>3️⃣ Assembly</span><span class="text-neon">$PCT_ASM%</span></div>
                             <div class="progress mb-2"><div class="progress-bar bg-neon progress-bar-striped progress-bar-animated" style="width: $PCT_ASM%">$COUNT_ASM / $TOTAL_SAMPLES</div></div>
@@ -256,7 +258,19 @@ while true; do
                     </div>
                     <div class="card-body p-2 d-flex flex-column mt-5 pb-0">
                         <div class="tab-content flex-grow-1">
-                            <div class="tab-pane fade show active h-100" id="p-qc"><div class="plot-container"><img src="qc_plot.png" class="plot-img"></div></div>
+                            <div class="tab-pane fade show active" id="p-qc">
+                                <div class="plot-container" style="justify-content: center; gap: 0px;">
+                                    <img src="qc_plot.png" class="plot-img" style="max-height: 85%; width: auto;">
+                                    <div class="px-3 py-3 border border-secondary rounded bg-black text-white small opacity-90" style="width: 95%; max-width: 700px; margin-bottom: 20px; margin-top: -60px; position: relative; z-index: 10;">
+                                        <div class="row g-2 text-start">
+                                            <div class="col-6"><span class="text-neon fw-bold">Pass</span>: 정상 (QC 통과)</div>
+                                            <div class="col-6"><span class="text-warning fw-bold">Low Paired</span>: Read 페어링 비율 80% 미만</div>
+                                            <div class="col-6"><span class="text-warning fw-bold">High Host</span>: 호스트 Read 제거율 30% 초과 </div>
+                                            <div class="col-6"><span class="text-danger fw-bold">Small File</span>: 데이터 파일 크기 5 GB 미달 </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="tab-pane fade h-100" id="p-bar"><div class="plot-container"><img src="kraken_bar.png" class="plot-img"></div></div>
                             <div class="tab-pane fade h-100" id="p-box"><div class="plot-container"><img src="kraken_box.png" class="plot-img"></div></div>
                         </div>
