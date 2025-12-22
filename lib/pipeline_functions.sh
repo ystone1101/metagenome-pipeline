@@ -492,7 +492,7 @@ print_progress_bar() {
         }
 
         # --- 그룹별 출력 (고정 높이 적용) ---
-        print_fixed_group "QC (KneadData/fastp)" "QC" "\033[1;33m" "$QC_LIMIT" "$all_status"
+        print_fixed_group "QC / Repair (Pre-processing)" "QC|Repair" "\033[1;33m" "$QC_LIMIT" "$all_status"
         print_fixed_group "Kraken2 (Taxonomy)" "Kraken" "\033[1;34m" "$KRAKEN_LIMIT" "$all_status"
         print_fixed_group "Annotation (Bracken/MPA)" "Bracken" "\033[1;35m" "$BRACKEN_LIMIT" "$all_status"
         print_fixed_group "MAG - Assembly" "Assembly" "\033[1;36m" "3" "$all_status"

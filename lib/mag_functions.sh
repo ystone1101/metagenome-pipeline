@@ -22,7 +22,7 @@ run_pair_repair() {
     conda run -n "$BBMAP_ENV" repair.sh \
         in1="$r1_in" in2="$r2_in" \
         out1="$r1_repaired" out2="$r2_repaired" \
-        repair >&2
+        repair >> "$LOG_FILE" 2>&1
         
     log_info "${sample_name}: 파일 페어링 복구 완료."
     echo "${r1_repaired} ${r2_repaired}"
