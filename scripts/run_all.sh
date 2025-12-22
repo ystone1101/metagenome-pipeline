@@ -321,7 +321,8 @@ while true; do
     # Phase 1 종료 후, MAG로 넘어가기 전에 누락된 Taxonomy 결과를 복구합니다.
     if [ -f "${PROJECT_ROOT_DIR}/scripts/auto_repair.sh" ]; then
         log_info "--- [Phase 1.2] Verifying Phase 1 Completeness & Auto-Repairing ---"
-        bash "${PROJECT_ROOT_DIR}/scripts/auto_repair.sh"
+        # 현재 설정된 출력 경로, DB 경로, 스레드 수를 넘겨줍니다.
+        bash "${PROJECT_ROOT_DIR}/scripts/auto_repair.sh" "$OUTPUT_DIR" "$KRAKEN2_DB" "$THREADS"
     else
         log_warn "Auto-repair script not found. Skipping repair."
     fi
@@ -383,7 +384,7 @@ while true; do
         #fi
 
         R2_CLEAN=$(get_r2_path "$R1_CLEAN") 
-        local status=$?
+        status=$?
 
         # 1. 파일명 패턴 오류 검사 (함수가 0이 아닌 코드 반환 시)
         if [ "$status" -ne 0 ]; then

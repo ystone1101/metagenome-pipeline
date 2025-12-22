@@ -3,8 +3,17 @@
 # ==============================================================================
 # 설정
 # ==============================================================================
-BASE_DIR="/data/CDC_2024ER110301/results"
-KRAKEN_DB="/data/DB/kraken2_standard"
+# 실행할 때 받은 인자를 변수로 사용합니다.
+BASE_DIR="$1"
+KRAKEN_DB="$2"
+THREADS="$3"
+
+# 인자가 없으면 에러 처리
+if [[ -z "$BASE_DIR" || -z "$KRAKEN_DB" ]]; then
+    echo "❌ Usage: auto_repair.sh <output_dir> <kraken_db> <threads>"
+    exit 1
+fi
+
 THREADS=20
 
 SCRIPT_DIR="$(dirname "$0")"
