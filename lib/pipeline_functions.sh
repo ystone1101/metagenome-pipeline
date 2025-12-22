@@ -506,3 +506,38 @@ print_progress_bar() {
     
     echo "[PROGRESS] [${current}/${total}] ${percent}% - Processing: ${sample_name}" >> "$LOG_FILE"
 }
+
+# ==========================================================
+# [추가] 대시보드 백그라운드 실행 관리자 (화가 함수)
+# ==========================================================
+show_progress_dashboard() {
+    local input_dir=$1
+    local output_dir=$2
+    local status_dir=$3
+    
+    # 1. 전체 샘플 수 계산 (진행률 계산용)
+    # (입력 폴더에서 _1.fastq.gz 파일 개수를 셉니다)
+    local total_samples=$(find "$input_dir" -maxdepth 1 -name "*_1.fastq.gz" 2>/dev/null | wc -l)
+    if [ "$total_samples" -eq 0 ]; then total_samples=1; fi
+
+    echo "[INFO] Dashboard started. Monitoring status in: $status_dir" >> "$LOG_FILE"
+
+    # 2. 무한 루프: 2초마다 화면을 새로 그립니다.
+    while true; do
+        # (1) 현재 가장 최근에 업데이트된 샘플 이름 찾기
+        # (가장 최근 수정된 .status 파일의 이름을 가져옴)
+        local current_sample=$(ls -t "$status_dir"/*.status 2>/dev/null | head -n 1 | xargs basename 2>/dev/null | sed 's/.status//')
+        
+        # (2) 현재 완료된 샘플 수 추정 (성공 플래그 파일 개수로 계산)
+        # (예: .assembly.success 같은 파일들을 찾아서 대략적인 진행도 파악)
+        local finished_count=$(find "$output_dir" -name "*.success" 2>/dev/null | wc -l)
+        # (정확한 진행률은 아니지만, 움직이는 효과를 위해 사용)
+        
+        # (3) 화면 그리기 함수 호출! (아까 그 도구 사용)
+        # 인자: [현재진행수] [전체수] [현재샘플명]
+        print_progress_bar "$finished_count" "$total_samples" "${current_sample:-Initializing...}"
+        
+        # (4) 2초 휴식 (너무 자주 그리면 깜빡임)
+        sleep 60
+    done
+}

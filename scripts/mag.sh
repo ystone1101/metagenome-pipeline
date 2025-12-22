@@ -4,15 +4,28 @@
 #================================================
 set -euo pipefail
 
-# [scripts/qc.sh 와 scripts/mag.sh 상단에 넣을 코드]
-if [[ -z "${DOKKAEBI_MASTER_COMMAND:-}" ]]; then
-    _term_handler() {
-        echo "Local Abort."
-        pkill -9 -P $$
-        exit 1
-    }
-    trap _term_handler SIGINT SIGTERM
-fi
+cleanup_and_exit() {
+    echo ""
+    echo "🛑 [WARN] 강제 종료 신호 감지! 하위 프로세스를 정리합니다..."
+    
+    # 1. 대시보드가 켜져 있다면 끄기
+    if [[ -n "$DASHBOARD_PID" ]]; then
+        kill "$DASHBOARD_PID" 2>/dev/null
+    fi
+
+    # 2. 현재 스크립트가 실행한 작업들(MEGAHIT, MetaBAT 등)만 찾아서 종료
+    # (pkill -P $$ 보다 jobs -p가 더 안전하고 정확합니다)
+    pids=$(jobs -p)
+    if [[ -n "$pids" ]]; then
+        echo "   - Killing child processes: $pids"
+        kill -9 $pids 2>/dev/null
+    fi
+
+    exit 1
+}
+
+# 언제든(단독 실행이든 아니든) 신호를 받으면 청소하고 죽어라!
+trap cleanup_and_exit SIGINT SIGTERM
 
 : "${GTDBTK_DATA_PATH:=}"
 
@@ -480,6 +493,21 @@ export LAST_PRINT_LINES=0
 TOTAL_SAMPLES=$(find "${QC_READS_DIR}" -maxdepth 1 -name "*_1.fastq.gz" | wc -l)
 CURRENT_PROGRESS=0
 
+# ==========================================================
+# [추가 1] 단독 실행 시 대시보드 백그라운드 실행 (화가 고용)
+# ==========================================================
+if [[ -z "${DOKKAEBI_MASTER_COMMAND:-}" ]]; then
+    # 상태 폴더 정의 (라이브러리와 동일하게 맞춤)
+    export JOB_STATUS_DIR="$STATUS_DIR"
+    mkdir -p "$JOB_STATUS_DIR"
+
+    echo "[INFO] Starting Dashboard in background..."
+    # 화가 함수를 백그라운드(&)로 실행하여 계속 그리게 시킴
+    show_progress_dashboard "$QC_READS_DIR" "$MAG_BASE_DIR" "$JOB_STATUS_DIR" &
+    DASHBOARD_PID=$!
+fi
+# ==========================================================
+
 for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
 
     # [추가] 다른 작업에서 재시작 신호를 보냈는지 확인
@@ -542,7 +570,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
 
     # printf "\n" >&2; log_info "--- Processing sample '$SAMPLE' ---"
     CURRENT_PROGRESS=$((CURRENT_PROGRESS + 1))
-    print_progress_bar "$CURRENT_PROGRESS" "$TOTAL_SAMPLES" "$SAMPLE"    
+    # print_progress_bar "$CURRENT_PROGRESS" "$TOTAL_SAMPLES" "$SAMPLE"    
 
     # 체크포인트 방식을 모두 .success 성공 플래그로 통일
     REPAIR_SUCCESS_FLAG="${REPAIR_DIR}/.${SAMPLE}.repair.success"
@@ -783,6 +811,14 @@ done
 log_info "Waiting for all parallel MAG jobs to finish..."
 wait
 log_info "All MAG parallel jobs finished."
+
+# ==========================================================
+# [추가 3] 대시보드 종료 (화가 퇴근)
+# ==========================================================
+if [[ -n "${DASHBOARD_PID:-}" ]]; then
+    kill "$DASHBOARD_PID" 2>/dev/null
+fi
+# ==========================================================
 
 # [추가] 재시작 신호가 있었는지 확인하고 최종 종료 코드 결정
 if [ -f "$RESTART_SIGNAL_FILE" ]; then
