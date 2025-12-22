@@ -396,6 +396,7 @@ if [[ -n "$GTDBTK_DATA_PATH" ]]; then
     echo "INFO: GTDB-Tk database path set to: ${GTDBTK_DATA_PATH}"
 fi
 echo "INFO: Bakta database path set to: ${BAKTA_DB_DIR_ARG}"
+echo "INFO: EggNOG database path set to: ${EGGNOG_DB_DIR_ARG}"
 
 # --- 7. 최종 설정값 로그 기록 ---
 log_info "--- Pipeline Configuration ---"
@@ -412,6 +413,7 @@ log_info "Skip Contigs    : ${SKIP_CONTIG_ANALYSIS}"
 log_info "Skip Bakta      : ${SKIP_BAKTA}"
 if [[ -n "$GTDBTK_DATA_PATH" ]]; then log_info "GTDB-Tk DB path : ${GTDBTK_DATA_PATH}"; fi
 log_info "Bakta DB path   : ${BAKTA_DB_DIR_ARG}"
+log_info "EggNOG DB path  : ${EGGNOG_DB_DIR_ARG}"
 log_info "------------------------------"
 
 # --- 8. 의존성 확인 ---
@@ -517,7 +519,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     fi
 
     # [1. 대기열 관리] 설정한 작업 수만큼만 동시에 실행되도록 대기
-    while [ $(jobs -r | wc -l) -ge "$MAX_MAG_JOBS" ]; do
+    while [ $(jobs -p | grep -v "$DASHBOARD_PID" | wc -l) -ge "$MAX_MAG_JOBS" ]; do
         if [ -f "$RESTART_SIGNAL_FILE" ]; then
             log_warn "Restart signal detected while waiting for slots."
             break 2 # while 루프와 바깥의 for 루프까지 한 번에 탈출!
@@ -527,6 +529,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
 
     # [2. 서브쉘 시작] 여기서부터 병렬 작업 시작! (괄호 열기)
     (
+        export FULL_THREADS="$THREADS"
         # 자원 변수 덮어쓰기 (중요: 이 내부에서만 적용됨)
         THREADS="$THREADS_PER_JOB"
         MEMORY_GB="$MEMORY_GB_PER_JOB"
@@ -659,7 +662,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         if [ -f "$REPAIR_SUCCESS_FLAG" ]; then
             echo "[INFO] Repair done for ${SAMPLE}" >> "$LOG_FILE"
         else
-            set_job_status "$SAMPLE" "Repairing reads (BBMap)..."
+            set_job_status "$SAMPLE" "Running Repair (BBMap)..."
             mkdir -p "$REPAIR_DIR_SAMPLE"
             repaired_files=($(run_pair_repair "$SAMPLE" "$R1_QC_GZ" "$R2_QC_GZ" "$REPAIR_DIR_SAMPLE"))
             if [[ ! -s "${repaired_files[0]}" ]]; then log_warn "Read pair repairing failed."; continue; fi
@@ -676,12 +679,9 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                 echo "[INFO] Assembly done for ${SAMPLE}" >> "$LOG_FILE"
             else
                 set_job_status "$SAMPLE" "Waiting for Assembly Solt..."
-                (
-                    flock 9
-                    set_job_status "$SAMPLE" "Running Assembly (MEGAHIT)..."
+                set_job_status "$SAMPLE" "Running Assembly (MEGAHIT)..."
                     run_megahit "$SAMPLE" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "$ASSEMBLY_OUT_DIR_SAMPLE" "$MEGAHIT_PRESET_TO_USE" "$MEMORY_GB" "$MIN_CONTIG_LEN" "$THREADS" "$MEGAHIT_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
-                ) 9>"$HEAVY_JOB_LOCK"
-                 
+                
                 if [ $? -eq 0 ]; then touch "$ASSEMBLY_SUCCESS_FLAG"; else log_warn "Assembly for ${SAMPLE} failed."; exit 1; fi
             fi
             
