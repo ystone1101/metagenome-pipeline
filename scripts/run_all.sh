@@ -141,7 +141,7 @@ if [[ "$P1_MODE" != "host" && "$P1_MODE" != "environmental" ]]; then
 fi
 
 # 변수 초기화
-INPUT_DIR=""; OUTPUT_DIR=""; KRAKEN2_DB=""; GTDBTK_DB=""; BAKTA_DB=""; HOST_DB="";
+INPUT_DIR=""; OUTPUT_DIR=""; KRAKEN2_DB=""; GTDBTK_DB=""; BAKTA_DB=""; EGGNOG_DB=""; HOST_DB="";
 THREADS=6; MEMORY_GB="60"; PARALLEL_JOBS=1
 # 모든 도구별 추가 옵션을 저장할 변수 초기화
 KNEADDATA_OPTS=""; FASTP_OPTS=""; KRAKEN2_OPTS=""; MEGAHIT_OPTS=""; METAWRAP_BINNING_OPTS=""
@@ -158,6 +158,7 @@ while [ $# -gt 0 ]; do
         --kraken2_db) KRAKEN2_DB="$2"; shift 2 ;;
         --gtdbtk_db) GTDBTK_DB="$2"; shift 2 ;;
         --bakta_db) BAKTA_DB="$2"; shift 2 ;;
+        --eggnog_db) EGGNOG_DB="$2"; shift 2 ;;
         --host_db) HOST_DB="$2"; shift 2 ;;
         --threads) THREADS="$2"; shift 2 ;;
         --memory_gb) MEMORY_GB="$2"; shift 2 ;;
@@ -422,7 +423,7 @@ while true; do
             bash "${PROJECT_ROOT_DIR}/scripts/mag.sh"
             all --input_dir "${P1_CLEAN_READS_DIR}" --output_dir "${P2_OUTPUT_DIR}"
             --raw_input_dir "${INPUT_DIR}"
-            --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}"
+            --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}" --eggnog_db_dir "${EGGNOG_DB}"
             --threads "${THREADS}" --memory_gb "${MEMORY_GB}"
             --parallel-jobs "${PARALLEL_JOBS}"
         )

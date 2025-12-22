@@ -3,7 +3,13 @@
 # ==============================================================================
 # 설정
 # ==============================================================================
-BASE_DIR="/data/CDC_2024ER110301/results"
+BASE_DIR="$1"
+
+if [[ -z "$BASE_DIR" ]]; then
+    echo "Usage: find_missing.sh <base_dir>"
+    exit 1
+fi
+
 OUTPUT_LIST="${BASE_DIR}/missing_list.txt"
 
 GREEN='\033[0;32m'

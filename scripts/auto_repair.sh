@@ -14,13 +14,20 @@ if [[ -z "$BASE_DIR" || -z "$KRAKEN_DB" ]]; then
     exit 1
 fi
 
-THREADS=20
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+PROJECT_ROOT_DIR=$(dirname "$SCRIPT_DIR")
 
-SCRIPT_DIR="$(dirname "$0")"
+# [핵심] qc.sh와 똑같이 설정 파일($KRAKEN_ENV 등)을 불러옵니다.
+if [ -f "${PROJECT_ROOT_DIR}/config/pipeline_config.sh" ]; then
+    source "${PROJECT_ROOT_DIR}/config/pipeline_config.sh"
+else
+    echo "Error: pipeline_config.sh not found."
+    exit 1
+fi
 
 # 1. 탐정 스크립트 실행
 # (여기서 안전한 명단 missing_list.txt가 생성됨)
-bash "${SCRIPT_DIR}/find_missing.sh"
+bash "${SCRIPT_DIR}/find_missing.sh" "$BASE_DIR"
 
 LIST_FILE="${BASE_DIR}/missing_list.txt"
 
@@ -63,18 +70,33 @@ while read -r SAMPLE_ID; do
     OUT_DIR="${QC_BASE}/02_kraken_output"
     mkdir -p "$OUT_DIR"
     
-    kraken2 --db "$KRAKEN_DB" --threads "$THREADS" \
+    echo "   Running Kraken2..."
+    conda run -n "$KRAKEN_ENV" kraken2 \
+        --db "$KRAKEN_DB" \
+        --threads "$THREADS" \
         --report "${OUT_DIR}/${SAMPLE_ID}.report" \
-        --paired "$INPUT_R1" "$INPUT_R2" > "${OUT_DIR}/${SAMPLE_ID}.output"
+        --paired \
+        --report-minimizer-data \
+        --minimum-hit-groups 3 \
+        "$INPUT_R1" "$INPUT_R2" > "${OUT_DIR}/${SAMPLE_ID}.output" 2> /dev/null
     
     # [Bracken 실행]
     if [ $? -eq 0 ]; then
         BRACKEN_OUT="${QC_BASE}/04_bracken_output"
         mkdir -p "$BRACKEN_OUT"
         
-        bracken -d "$KRAKEN_DB" -i "${OUT_DIR}/${SAMPLE_ID}.report" \
+        # Bracken도 qc.sh 설정값($BRACKEN_READ_LEN, $BRACKEN_THRESHOLD) 사용
+        # 단, 복구 스크립트에서는 보통 Species(S) 레벨만 복구하거나 루프를 돌림.
+        # 여기서는 가장 중요한 'S' 레벨 복구
+        echo "   Running Bracken..."
+        conda run -n "$KRAKEN_ENV" bracken \
+            -d "$KRAKEN_DB" \
+            -i "${OUT_DIR}/${SAMPLE_ID}.report" \
             -o "${BRACKEN_OUT}/${SAMPLE_ID}.bracken" \
-            -r 150 -l S -t "$THREADS"
+            -r "${BRACKEN_READ_LEN:-100}" \
+            -l S \
+            -t "${BRACKEN_THRESHOLD:-10}" # qc.sh는 threshold를 사용함 (-t는 스레드가 아님)
+            
         echo "   ✅ Success: $SAMPLE_ID restored!"
     else
         echo "   💥 Failed: Kraken2 error on $SAMPLE_ID"
