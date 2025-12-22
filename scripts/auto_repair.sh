@@ -16,14 +16,7 @@ fi
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 PROJECT_ROOT_DIR=$(dirname "$SCRIPT_DIR")
-
-# [핵심] qc.sh와 똑같이 설정 파일($KRAKEN_ENV 등)을 불러옵니다.
-if [ -f "${PROJECT_ROOT_DIR}/config/pipeline_config.sh" ]; then
-    source "${PROJECT_ROOT_DIR}/config/pipeline_config.sh"
-else
-    echo "Error: pipeline_config.sh not found."
-    exit 1
-fi
+source "${PROJECT_ROOT_DIR}/config/pipeline_config.sh"
 
 # 1. 탐정 스크립트 실행
 # (여기서 안전한 명단 missing_list.txt가 생성됨)
