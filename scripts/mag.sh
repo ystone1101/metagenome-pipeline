@@ -80,7 +80,7 @@ print_usage() {
     echo "  --tmp_dir PATH           - Path to a temporary directory. (Default: /home/kys/Desktop/tmp)"
     echo ""
     echo -e "${CYAN}${BOLD}Tool-specific Options (pass-through):${NC}"
-    echo "  --annotation-tool STR   Tool for MAG annotation: 'eggnog' (default) or 'bakta'"
+    echo "  --annotation-tool STR   Tool for Contig annotation: 'eggnog' (default) or 'bakta'"
     echo "  --keep-temp-files        - Do not delete intermediate temporary files (for debugging)."
     echo "  --skip-contig-analysis   - Skip Kraken2 and Bakta analysis on assembled contigs."    
     echo "  --skip-annotation             - Skip ONLY Functional Annotation (Bakta/EggNOG) analysis on contigs."
@@ -111,6 +111,8 @@ RUN_TEST_MODE=false
 KEEP_TEMP_FILES=false
 SKIP_CONTIG_ANALYSIS=false
 SKIP_ANNOTATION=false
+SKIP_BAKTA=false
+SKIP_EGGNOG=false
 INPUT_DIR_ARG=""
 RAW_INPUT_DIR=""
 OUTPUT_DIR_ARG=""
@@ -212,6 +214,43 @@ if [ "$RUN_TEST_MODE" = true ]; then
     run_pipeline_test
     exit $? 
 fi
+
+if [ -z "$ANNOTATION_TOOL" ]; then
+    ANNOTATION_TOOL="eggnog"
+fi
+
+# 2. 필수 인자 및 DB 유효성 검사
+declare -a error_messages=()
+
+# (1) 기본 필수 경로 체크
+if [[ -z "$INPUT_DIR_ARG" ]]; then error_messages+=("  - --input_dir is required."); fi
+if [[ -z "$OUTPUT_DIR_ARG" ]]; then error_messages+=("  - --output_dir is required."); fi
+
+# (2) Annotation Tool에 따른 DB 경로 체크
+if [[ "$SKIP_ANNOTATION" == "false" && "$SKIP_CONTIG_ANALYSIS" == "false" ]]; then
+    
+    # 사용자가 'bakta'를 선택했다면 -> Bakta DB 필수
+    if [[ "$ANNOTATION_TOOL" == "bakta" && -z "$BAKTA_DB_DIR_ARG" ]]; then
+        error_messages+=("  - --bakta_db_dir is required when choosing 'bakta'.")
+    fi
+    
+    # 사용자가 'eggnog'를 선택했다면 (또는 기본값) -> EggNOG DB 필수
+    if [[ "$ANNOTATION_TOOL" == "eggnog" && -z "$EGGNOG_DB_DIR_ARG" ]]; then
+        error_messages+=("  - --eggnog_db_dir is required when choosing 'eggnog'.")
+    fi
+fi
+
+# (3) 에러가 하나라도 있으면 메시지 출력 후 종료
+if [ ${#error_messages[@]} -gt 0 ]; then
+    echo "========================================================"
+    echo " [ERROR] Missing required arguments for MAG pipeline:"
+    for msg in "${error_messages[@]}"; do
+        echo "$msg"
+    done
+    echo "========================================================"
+    exit 1
+fi
+# ------------------------------------------------------------------
 
 # ==========================================================
 # --- 일반 실행 모드 (NORMAL EXECUTION MODE) ---

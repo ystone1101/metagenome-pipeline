@@ -100,7 +100,7 @@ print_usage() {
     echo "  --memory_gb INT       - Max memory in Gigabytes for KneadData and MEGAHIT. (Default: 60)"
     echo "  --parallel-jobs N     - Number of samples to process in parallel (Default: 1)"
     echo "                        (Resources will be divided by N automatically)"
-    echo "  --annotation-tool STR   - Tool for MAG annotation: 'eggnog' (default) or 'bakta'"
+    echo "  --annotation-tool STR   Tool for Contig annotation: 'eggnog' (default) or 'bakta'"
     echo "  --skip-contig-analysis  - Skip Kraken2/Annotation analysis on assembled contigs."    
     echo "  --skip-annotation       - Skip ONLY Functional Annotation (Bakta/EggNOG) analysis on contigs."
     echo "  --verbose             - Show detailed logs in terminal instead of progress bar."
