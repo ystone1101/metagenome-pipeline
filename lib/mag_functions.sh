@@ -92,7 +92,7 @@ run_kraken2_on_contigs() {
         --report "$k2_report" "$assembly_file" $extra_opts > "${kraken_out_dir}/${sample_name}_contigs.kraken2"
     
         log_info "${sample_name}: Kraken2 실행 완료."
-    f1
+    fi
 
     if [[ -f "$k2_report" ]]; then
         log_info "${sample_name}: Contig 분류 통계 계산 중..."
