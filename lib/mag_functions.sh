@@ -7,6 +7,11 @@
 run_pair_repair() {
     local sample_name=$1; local r1_in=$2; local r2_in=$3; local repair_out_dir=$4
     
+    # [추가] 대시보드야, 나 'Repair' 작업 시작한다! (출근 도장 쾅!)
+    if [[ -n "$JOB_STATUS_DIR" && -d "$JOB_STATUS_DIR" ]]; then
+        echo -e "Running Repair\t${sample_name}" > "${JOB_STATUS_DIR}/${sample_name}.status"
+    fi
+
     log_info "${sample_name}: BBMap repair.sh로 FASTQ 페어링 복구 중..."
     
     local r1_repaired="${repair_out_dir}/${sample_name}_R1.repaired.fastq.gz"
@@ -32,6 +37,11 @@ run_megahit() {
     local sample_name=$1; local r1_qc=$2; local r2_qc=$3; local assembly_out_dir=$4; local preset_option=$5; local memory_gb=$6;
     local min_contig_len=$7; local threads=$8; local extra_opts="${9:-}"
     
+    # [1] 대시보드용 출근 도장 (Running Assembly)
+    if [[ -n "$JOB_STATUS_DIR" && -d "$JOB_STATUS_DIR" ]]; then
+        echo -e "Running Assembly\t${sample_name}" > "${JOB_STATUS_DIR}/${sample_name}.status"
+    fi
+
     # ✨✨ 해결책: 함수가 시작될 때 출력 폴더를 직접 생성합니다. ✨✨
 #    mkdir -p "$assembly_out_dir"
     
@@ -63,7 +73,7 @@ run_megahit() {
             -o "$assembly_out_dir" \
             --presets "$preset_option" \
             --min-contig-len "$min_contig_len" \
-            -t "$threads" -m "$((memory_gb * 1000000000))" $extra_opts
+            -t "$threads" -m "$((memory_gb * 1000000000))" $extra_opts >> "$LOG_FILE" 2>&1
     fi
         
     if [[ -f "$final_assembly_file" ]]; then
@@ -359,6 +369,11 @@ run_metawrap_sample() {
         return 0
     fi
 
+    # [1] 대시보드용 출근 도장 (Running Binning)
+    if [[ -n "$JOB_STATUS_DIR" && -d "$JOB_STATUS_DIR" ]]; then
+        echo -e "Running Binning\t${sample_name}" > "${JOB_STATUS_DIR}/${sample_name}.status"
+    fi
+
     local read_qc_dir="${metawrap_sample_dir}/read_qc"
     local temp_uncompressed_dir="${metawrap_sample_dir}/temp_uncompressed_reads"
 
@@ -377,7 +392,7 @@ run_metawrap_sample() {
         conda run -n "$METAWRAP_ENV" metawrap read_qc \
             -1 "$r1_uncompressed" -2 "$r2_uncompressed" \
             -t "$THREADS" -o "$read_qc_dir" \
-            --skip-bmtagger --skip-pre-qc-report --skip-post-qc-report --skip-trimming
+            --skip-bmtagger --skip-pre-qc-report --skip-post-qc-report --skip-trimming >> "$LOG_FILE" 2>&1
     else
         log_info "${sample_name}: MetaWRAP read_qc results found. Skipping."
     fi
@@ -390,7 +405,7 @@ run_metawrap_sample() {
     local initial_bins_dir="${metawrap_sample_dir}/binning"
     if [[ ! -d "${initial_bins_dir}/concoct_bins" ]]; then
         log_info "${sample_name}: Running MetaWRAP binning module..."
-        conda run -n "$METAWRAP_ENV" metawrap binning -o "$initial_bins_dir" -t "$THREADS" -a "$assembly_file" --metabat2 --maxbin2 --concoct $binning_extra_opts "${read_qc_dir}/"*.fastq 
+        conda run -n "$METAWRAP_ENV" metawrap binning -o "$initial_bins_dir" -t "$THREADS" -a "$assembly_file" --metabat2 --maxbin2 --concoct $binning_extra_opts "${read_qc_dir}/"*.fastq >> "$LOG_FILE" 2>&1
     else
         log_info "${sample_name}: MetaWRAP binning results found. Skipping."
     fi
@@ -399,7 +414,7 @@ run_metawrap_sample() {
     log_info "${sample_name}: Running MetaWRAP bin_refinement module..."
     conda run -n "$METAWRAP_ENV" metawrap bin_refinement -o "${metawrap_sample_dir}/bin_refinement" -t "$THREADS" \
         -A "${initial_bins_dir}/metabat2_bins/" -B "${initial_bins_dir}/maxbin2_bins/" \
-        -C "${initial_bins_dir}/concoct_bins/" -c "$min_completeness" -x "$max_contamination" $refinement_extra_opts
+        -C "${initial_bins_dir}/concoct_bins/" -c "$min_completeness" -x "$max_contamination" $refinement_extra_opts "$LOG_FILE" 2>&1
         
     if [[ ! -d "$final_bins_dir" ]]; then
         log_warn "MetaWRAP bin_refinement failed for ${sample_name}."
@@ -614,7 +629,7 @@ run_eggnog_on_contigs() {
     log_info "${sample_name}: EggNOG annotation finished."
 
 # 3. 주석 비율 검증
-    check_annotation_ratio "$sample_name" "$protein_file" "$annotation_file"
+    check_annotation_ratio "$sample_name" "$protein_file" "${eggnog_output_prefix}.emapper.annotations"
 }
 
 # --- [내부 함수] 주석 비율 계산기 (유지) ---
