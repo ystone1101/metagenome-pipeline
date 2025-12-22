@@ -8,9 +8,9 @@ run_pair_repair() {
     local sample_name=$1; local r1_in=$2; local r2_in=$3; local repair_out_dir=$4
     
     # [추가] 대시보드야, 나 'Repair' 작업 시작한다! (출근 도장 쾅!)
-    if [[ -n "$JOB_STATUS_DIR" && -d "$JOB_STATUS_DIR" ]]; then
-        echo -e "Running Repair\t${sample_name}" > "${JOB_STATUS_DIR}/${sample_name}.status"
-    fi
+    # if [[ -n "$JOB_STATUS_DIR" && -d "$JOB_STATUS_DIR" ]]; then
+    #    echo -e "Running Repair\t${sample_name}" > "${JOB_STATUS_DIR}/${sample_name}.status"
+    # fi
 
     log_info "${sample_name}: BBMap repair.sh로 FASTQ 페어링 복구 중..."
     
@@ -38,9 +38,9 @@ run_megahit() {
     local min_contig_len=$7; local threads=$8; local extra_opts="${9:-}"
     
     # [1] 대시보드용 출근 도장 (Running Assembly)
-    if [[ -n "$JOB_STATUS_DIR" && -d "$JOB_STATUS_DIR" ]]; then
-        echo -e "Running Assembly\t${sample_name}" > "${JOB_STATUS_DIR}/${sample_name}.status"
-    fi
+    # if [[ -n "$JOB_STATUS_DIR" && -d "$JOB_STATUS_DIR" ]]; then
+    #    echo -e "Running Assembly\t${sample_name}" > "${JOB_STATUS_DIR}/${sample_name}.status"
+    # fi
 
     # ✨✨ 해결책: 함수가 시작될 때 출력 폴더를 직접 생성합니다. ✨✨
 #    mkdir -p "$assembly_out_dir"
@@ -370,9 +370,9 @@ run_metawrap_sample() {
     fi
 
     # [1] 대시보드용 출근 도장 (Running Binning)
-    if [[ -n "$JOB_STATUS_DIR" && -d "$JOB_STATUS_DIR" ]]; then
-        echo -e "Running Binning\t${sample_name}" > "${JOB_STATUS_DIR}/${sample_name}.status"
-    fi
+    # if [[ -n "$JOB_STATUS_DIR" && -d "$JOB_STATUS_DIR" ]]; then
+    #    echo -e "Running Binning\t${sample_name}" > "${JOB_STATUS_DIR}/${sample_name}.status"
+    # fi
 
     local read_qc_dir="${metawrap_sample_dir}/read_qc"
     local temp_uncompressed_dir="${metawrap_sample_dir}/temp_uncompressed_reads"

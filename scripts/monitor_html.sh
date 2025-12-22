@@ -125,6 +125,9 @@ while true; do
     QC_BASE="${BASE_DIR}/1_microbiome_taxonomy"
     COUNT_QC=$(find "$QC_BASE" -name "*_paired_1.fastq.gz" 2>/dev/null | wc -l)
     PCT_QC=$(( (COUNT_QC * 100) / TOTAL_SAMPLES ))
+    if [ "$COUNT_QC" -eq "$TOTAL_SAMPLES" ] && [ "$TOTAL_SAMPLES" -gt 0 ]; then STATUS_QC="DONE"
+    elif [ -n "$IS_QC_RUNNING" ] || [ "$COUNT_QC" -gt 0 ]; then STATUS_QC="RUNNING"
+    else STATUS_QC="IDLE"; fi
 
     # 3. Taxonomy
     COUNT_TAX=$(find "$QC_BASE" -name "*_S.bracken" 2>/dev/null | wc -l)
@@ -132,13 +135,23 @@ while true; do
         COUNT_TAX=$(find "$QC_BASE" -name "*.bracken" 2>/dev/null | sed 's/.*\///' | sed -E 's/(_S|_G|_F|_species)\.bracken//g' | sort | uniq | wc -l)
     fi
     PCT_TAX=$(( (COUNT_TAX * 100) / TOTAL_SAMPLES ))
+    if [ "$COUNT_TAX" -eq "$TOTAL_SAMPLES" ] && [ "$TOTAL_SAMPLES" -gt 0 ]; then STATUS_TAX="DONE"
+    elif [ -n "$IS_TAX_RUNNING" ] || [ "$COUNT_TAX" -gt 0 ]; then STATUS_TAX="RUNNING"
+    else STATUS_TAX="IDLE"; fi
 
     # 4. Assembly / Binning / Annotation
     MAG_BASE="${BASE_DIR}/2_mag_analysis"
-    COUNT_ASM=$(find "$MAG_BASE" -name "final.contigs.fa" 2>/dev/null | wc -l); PCT_ASM=$(( (COUNT_ASM * 100) / TOTAL_SAMPLES ))
-    if [ "$COUNT_ASM" -gt 0 ] && [ "$COUNT_ASM" -lt "$TOTAL_SAMPLES" ]; then STATUS_ASM="RUNNING"; 
-    elif [ "$COUNT_ASM" -eq "$TOTAL_SAMPLES" ] && [ "$TOTAL_SAMPLES" -gt 1 ]; then STATUS_ASM="DONE"; 
-    else STATUS_ASM="IDLE"; fi
+    COUNT_ASM=$(find "$MAG_BASE" -maxdepth 2 -name "done" 2>/dev/null | wc -l); PCT_ASM=$(( (COUNT_ASM * 100) / TOTAL_SAMPLES ))
+    # 1. 100% 완료되었는가?
+    if [ "$COUNT_ASM" -eq "$TOTAL_SAMPLES" ] && [ "$TOTAL_SAMPLES" -gt 0 ]; then 
+        STATUS_ASM="DONE"
+    # 2. 파일이 1개라도 생겼거나, 혹은 지금 막 프로세스가 시작되었는가?
+    elif [ -n "$IS_ASM_RUNNING" ] || [ "$COUNT_ASM" -gt 0 ]; then 
+        STATUS_ASM="RUNNING"
+# 3. 그 외에는 아직 시작 전임
+    else 
+        STATUS_ASM="IDLE"
+    fi
 
     COUNT_MAG=$(find "$MAG_BASE" -name "gtdbtk.*.summary.tsv" 2>/dev/null | wc -l); PCT_MAG=$(( (COUNT_MAG * 100) / TOTAL_SAMPLES ))
     if [ "$COUNT_MAG" -gt 0 ] && [ "$COUNT_MAG" -lt "$TOTAL_SAMPLES" ]; then STATUS_MAG="RUNNING"; 
@@ -153,7 +166,7 @@ while true; do
     # --------------------------------------------------------------------------
     # [프로세스 체크 및 파일 업데이트]
     # --------------------------------------------------------------------------
-    ALL_PROCESSES=$(ps -ef); IS_QC_RUNNING=$(echo "$ALL_PROCESSES" | grep "kneaddata" | grep -v "grep"); IS_TAX_RUNNING=$(echo "$ALL_PROCESSES" | grep -E "kraken2|bracken" | grep -v "grep")
+    ALL_PROCESSES=$(ps -ef); IS_QC_RUNNING=$(echo "$ALL_PROCESSES" | grep "kneaddata" | grep -v "grep"); IS_TAX_RUNNING=$(echo "$ALL_PROCESSES" | grep -E "kraken2|bracken" | grep -v "grep"); IS_ASM_RUNNING=$(echo "$ALL_PROCESSES" | grep -E "spades|megahit|mag.sh" | grep -v "grep")
     find "$QC_BASE" -name "*.kraken2" -o -name "*.output" 2>/dev/null | sed 's/.*\///' | sed 's/\.kraken2//' | sed 's/\.output//' | sort | uniq > /tmp/h_start.txt
     find "$QC_BASE" -name "*.bracken" 2>/dev/null | sed 's/.*\///' | sed -E 's/(_S|_G|_F|_species)\.bracken//g' | sed 's/\.bracken//g' | sort | uniq > /tmp/h_end.txt
     STALLED_COUNT=$(comm -23 /tmp/h_start.txt /tmp/h_end.txt | wc -l)
@@ -168,6 +181,49 @@ while true; do
         echo "<tbody>$(tail -n +2 "$1" | awk -F"$2" '{print "<tr>"; for(i=1;i<=NF;i++) print "<td>"$i"</td>"; print "</tr>"}')</tbody></table></div>"
     }
 
+# --------------------------------------------------------------------------
+    # [수정] Assembly Stats 통합 데이터 준비 (Contig 기준)
+    # --------------------------------------------------------------------------
+    if [ "$COUNT_ASM" -eq "$TOTAL_SAMPLES" ] && [ "$TOTAL_SAMPLES" -gt 0 ]; then 
+        STATUS_ASM="DONE"
+    
+    # 2. 완료된 파일이 없더라도(0개라도), 프로세스가 돌고 있으면 무조건 RUNNING!
+    elif [ -n "$IS_ASM_RUNNING" ] || [ "$COUNT_ASM" -gt 0 ]; then 
+        STATUS_ASM="RUNNING"
+    
+    # 3. 돌지도 않고 완료된 파일도 없으면 그때서야 IDLE
+    else 
+        STATUS_ASM="IDLE"
+    fi
+
+    ASM_STATS_MERGED="${WEB_DIR}/assembly_stats_summary.tsv"
+    # 헤더 명칭을 Contig 중심으로 변경
+    echo -e "Sample\tContigs\tTotal_Len\tContig_N50\tMax_Contig\tGC(%)" > "$ASM_STATS_MERGED"
+
+    for s_dir in "${MAG_BASE}"/*; do
+        if [ -d "$s_dir" ]; then
+            s_name=$(basename "$s_dir")
+            stat_file=$(find "$s_dir" -name "*stats.txt" -o -name "*.stats" | head -n 1)
+            
+            if [ -f "$stat_file" ]; then
+                # [수정] Scaffold 대신 Contig 라인을 추출하도록 패턴 변경
+                contig_total=$(grep "Main genome contig total:" "$stat_file" | awk '{print $NF}')
+                # MB 단위를 포함한 전체 Contig 길이
+                contig_seq_total=$(grep "Main genome contig sequence total:" "$stat_file" | awk '{print $6, $7}')
+                # Contig N/L50에서 뒷부분(L50, 즉 길이)만 추출
+                contig_n50=$(grep "Main genome contig N/L50:" "$stat_file" | awk -F'/' '{print $2}')
+                # 가장 긴 Contig 길이
+                max_contig=$(grep "Max contig length:" "$stat_file" | awk '{print $4, $5}')
+                
+                # GC 수치 파싱 (보통 하단에 위치)
+                gc_val=$(grep "Main genome GC:" "$stat_file" | awk '{print $4}')
+                [ -z "$gc_val" ] && gc_val="-"
+
+                echo -e "${s_name}\t${contig_total}\t${contig_seq_total}\t${contig_n50}\t${max_contig}\t${gc_val}" >> "$ASM_STATS_MERGED"
+            fi
+        fi
+    done
+
     # QC Summary 데이터를 정렬합니다. (헤더 제외, 쉼표 기준, 첫 번째 컬럼 정렬)
     SORTED_QC_DATA=$(tail -n +2 "${WEB_DIR}/qc_summary.csv" | sort -t',' -k1 2>/dev/null)
 
@@ -175,7 +231,9 @@ while true; do
     echo "$(head -n 1 "${WEB_DIR}/qc_summary.csv" 2>/dev/null)" > "${WEB_DIR}/qc_summary_sorted.csv"
     echo "$SORTED_QC_DATA" >> "${WEB_DIR}/qc_summary_sorted.csv"
 
-    QC_TABLE=$(csv_to_html "${WEB_DIR}/qc_summary_sorted.csv" ","); KR_TABLE=$(csv_to_html "${WEB_DIR}/kraken2_summary.tsv" "\t")
+    QC_TABLE=$(csv_to_html "${WEB_DIR}/qc_summary_sorted.csv" ",") 
+    KR_TABLE=$(csv_to_html "${WEB_DIR}/kraken2_summary.tsv" "\t")
+    AS_TABLE=$(csv_to_html "${WEB_DIR}/assembly_stats_summary.tsv" "\t")
 
 # --------------------------------------------------------------------------
     # [HTML 생성 - 태그 오류 수정 및 하단 테이블 포함 전문]
@@ -223,18 +281,18 @@ while true; do
                         <div class="mb-4">
                             <div class="d-flex justify-content-between small fw-bold mb-1"><span>1️⃣ Reads QC</span><span class="text-neon">$PCT_QC%</span></div>
                             <div class="progress mb-2"><div class="progress-bar bg-neon progress-bar-striped progress-bar-animated" style="width: $PCT_QC%">$COUNT_QC / $TOTAL_SAMPLES</div></div>
-                            $(if [ -n "$IS_QC_RUNNING" ]; then echo "<span class='badge bg-primary px-3 py-2'>RUNNING</span>"; else echo "<span class='badge bg-secondary px-3 py-2'>IDLE</span>"; fi)
+                            $(if [ "$STATUS_QC" == "DONE" ]; then echo "<span class='badge bg-success px-3 py-2'>DONE</span>"; elif [ "$STATUS_QC" == "RUNNING" ]; then echo "<span class='badge bg-primary px-3 py-2'>RUNNING</span>"; else echo "<span class='badge bg-secondary px-3 py-2'>IDLE</span>"; fi)
                         </div>
                         <div class="mb-4">
                             <div class="d-flex justify-content-between small fw-bold mb-1"><span>2️⃣ Taxonomy Assignment</span><span class="text-neon">$PCT_TAX%</span></div>
                             <div class="progress mb-2"><div class="progress-bar bg-neon progress-bar-striped progress-bar-animated" style="width: $PCT_TAX%">$COUNT_TAX / $TOTAL_SAMPLES</div></div>
-                            $(if [ -n "$IS_TAX_RUNNING" ]; then echo "<span class='badge bg-primary px-3 py-2'>RUNNING</span>"; elif [ "$STALLED_COUNT" -gt 0 ]; then echo "<span class='badge bg-danger px-3 py-2'>STALLED ($STALLED_COUNT)</span>"; else echo "<span class='badge bg-secondary px-3 py-2'>IDLE</span>"; fi)
+                            $(if [ "$STATUS_TAX" == "DONE" ]; then echo "<span class='badge bg-success px-3 py-2'>DONE</span>"; elif [ "$STATUS_TAX" == "RUNNING" ]; then echo "<span class='badge bg-primary px-3 py-2'>RUNNING</span>"; else echo "<span class='badge bg-secondary px-3 py-2'>IDLE</span>"; fi)
                         </div>
                         <h6 class="text-secondary pt-4 mt-4 mb-2 border-top border-secondary">STEP 2: ASSEMBLY & ANNOTATION</h6>
                         <div class="mb-4">
                             <div class="d-flex justify-content-between small fw-bold mb-1"><span>3️⃣ Assembly</span><span class="text-neon">$PCT_ASM%</span></div>
                             <div class="progress mb-2"><div class="progress-bar bg-neon progress-bar-striped progress-bar-animated" style="width: $PCT_ASM%">$COUNT_ASM / $TOTAL_SAMPLES</div></div>
-                            $(if [ "$STATUS_ASM" == "RUNNING" ]; then echo "<span class='badge bg-primary px-3 py-2'>RUNNING</span>"; elif [ "$STATUS_ASM" == "DONE" ]; then echo "<span class='badge bg-success px-3 py-2'>DONE</span>"; else echo "<span class='badge bg-secondary px-3 py-2'>IDLE</span>"; fi)
+                            $(if [ "$STATUS_ASM" == "DONE" ]; then echo "<span class='badge bg-success px-3 py-2'>DONE</span>"; elif [ "$STATUS_ASM" == "RUNNING" ]; then echo "<span class='badge bg-primary px-3 py-2'>RUNNING</span>"; else echo "<span class='badge bg-secondary px-3 py-2'>IDLE</span>"; fi)
                         </div>
                         <div class="mb-4">
                             <div class="d-flex justify-content-between small fw-bold mb-1"><span>4️⃣ Binning</span><span class="text-neon">$PCT_MAG%</span></div>
@@ -284,6 +342,7 @@ while true; do
                         <ul class="nav nav-tabs mb-2">
                             <li class="nav-item"><button class="nav-link active small" data-bs-toggle="tab" data-bs-target="#c-qc">QC Summary</button></li>
                             <li class="nav-item"><button class="nav-link small" data-bs-toggle="tab" data-bs-target="#c-kr">Taxonomy Assignment</button></li>
+                            <li class="nav-item"><button class="nav-link small" data-bs-toggle="tab" data-bs-target="#c-as">Assembly Stats</button></li>
                         </ul>
                         <div class="tab-content pt-2">
                             <div class="tab-pane fade show active" id="c-qc">
@@ -294,6 +353,10 @@ while true; do
                                 <div class="text-end mb-1"><a href="kraken2_summary.tsv" class="text-neon text-decoration-none small" download>📥 Download TSV</a></div>
                                 $KR_TABLE
                             </div>
+                            <div class="tab-pane fade" id="c-as">
+                                <div class="text-end mb-1"><a href="assembly_stats_summary.tsv" class="text-neon text-decoration-none small" download>📥 Download TSV</a></div>
+                                $(csv_to_html "${WEB_DIR}/assembly_stats_summary.tsv" "\t")
+                            </div>        
                         </div>
                     </div>
                 </div>
