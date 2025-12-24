@@ -621,7 +621,6 @@ run_eggnog_on_contigs() {
             --output_dir "$out_dir" \
             --data_dir "$eggnog_db_path" \
             -m diamond --itype proteins --cpu "$THREADS" \
-            --metagenome \
             --go_evidence non-electronic \
             --tax_scope auto \
             --override $extra_opts >> "$LOG_FILE" 2>&1
