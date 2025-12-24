@@ -86,7 +86,7 @@ run_megahit() {
 
 #--- Kraken2 on Contigs Function ---
 run_kraken2_on_contigs() {
-    local sample_name=$1; local assembly_file=$2; local kraken_out_dir=$3; local kraken_db=$4; local threads=$5; local summary_tsv_file="${6:-}; local extra_opts="${7:-}"
+    local sample_name=$1; local assembly_file=$2; local kraken_out_dir=$3; local kraken_db=$4; local threads=$5; local summary_tsv_file="${6:-}"; local extra_opts="${7:-}"
     
     mkdir -p "$kraken_out_dir"
     
