@@ -631,7 +631,7 @@ run_eggnog_on_contigs() {
             --tax_scope auto \
             --override $extra_opts >> "$LOG_FILE" 2>&1
     )
-    
+
     if [ $? -ne 0 ]; then
         log_error "EggNOG-mapper failed for ${sample_name}."
         return 1
@@ -645,27 +645,38 @@ run_eggnog_on_contigs() {
 
 # --- [내부 함수] 주석 비율 계산기 (유지) ---
 check_annotation_ratio() {
-    local sample=$1; local prot_file=$2; local annot_file=$3
+    local sample=$1; local prot_file=$2; local annot_file=$3, local csv_file="${4:-}"
     
+    # 파일이 존재하는지 먼저 확인
     if [[ -f "$prot_file" && -f "$annot_file" ]]; then
-        local total_genes=$(grep -c "^>" "$prot_file")
-        local annotated_genes=$(grep -v "^#" "$annot_file" | wc -l)
+        # 유전자 수 카운트 (헤더 개수)
+        local total_genes=$(grep -c "^>" "$prot_file" 2>/dev/null || echo "0")
+        
+        # 주석 달린 수 카운트 (주석(#) 라인 제외)
+        local annotated_genes=$(grep -v "^#" "$annot_file" 2>/dev/null | wc -l)
         
         if [ "$total_genes" -gt 0 ]; then
+            # 비율 계산
             local ratio=$(awk -v a="$annotated_genes" -v t="$total_genes" 'BEGIN {printf "%.2f", (a/t)*100}')
             local msg="${sample}: Functional Annotation Ratio = ${ratio}% ($annotated_genes / $total_genes)"
             
+            # 로그 출력
             if (( $(echo "$ratio >= 80.0" | bc -l) )); then
                 log_info "[PASS] $msg (>= 80%)"
             else
                 log_warn "[LOW-QUAL] $msg (< 80% - Check assembly quality)"
             fi
 
+            # [핵심 수정 2] csv_file 변수가 비어있지 않을 때만(-n) 실행
             if [[ -n "$csv_file" ]]; then
-                # 중복 기록 방지 (이미 해당 샘플이 있으면 덮어쓰지 않고 넘어감, 혹은 grep으로 체크)
-                if ! grep -q "^${sample}," "$csv_file"; then
-                    echo "${sample},${total_genes},${annotated_genes},${ratio},${status}" >> "$csv_file"
-                fi
+                # 파일 잠금(flock) 후 안전하게 쓰기
+                (
+                    flock 200
+                    # 중복 방지 체크 후 기록
+                    if ! grep -q "^${sample}," "$csv_file" 2>/dev/null; then
+                        echo "${sample},${total_genes},${annotated_genes},${ratio},Done" >> "$csv_file"
+                    fi
+                ) 200>"${csv_file}.lock"
             fi
         fi
     fi

@@ -643,7 +643,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
 
     else
         # === megahit, metawrap, all 모드 ===
-#    if [[ "$RUN_MODE" != "post-process" ]]; then
+        #    if [[ "$RUN_MODE" != "post-process" ]]; then
         # 1. Read Pair Repair 단계
         R1_REPAIRED_GZ="${REPAIR_DIR_SAMPLE}/${SAMPLE}_R1.repaired.fastq.gz"
         # .success 플래그와 실제 결과 파일(.fastq.gz) 존재 여부를 함께 확인
@@ -719,21 +719,23 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         fi
         
         if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "metawrap" ]]; then
-            if [ ! -f "$ASSEMBLY_SUCCESS_FLAG" ]; then 
-                log_warn "Assembly must be completed first. Skipping binning.";
+            if [[ ! -f "$ASSEMBLY_FA" ]]; then 
+                log_warn "Assembly file ($ASSEMBLY_FA) not found. Skipping binning.";
             else
-                # 4. Binning 단계
-                # .success 플래그와 실제 결과 폴더(FINAL_BINS_DIR) 존재 및 내용물(-n)을 함께 확인
-                #if [ -f "$BINNING_SUCCESS_FLAG" ] && [ -d "$FINAL_BINS_DIR" ] && [ -n "$(ls -A "$FINAL_BINS_DIR" 2>/dev/null)" ]; then
-                #    log_info "Binning for ${SAMPLE} already exists. Skipping."
-                #else
+                # 파일이 있으니 Binning 진행!
                 if [ -f "$BINNING_SUCCESS_FLAG" ]; then
                     echo "[INFO] Binning done for ${SAMPLE}" >> "$LOG_FILE"
                 else
                     set_job_status "$SAMPLE" "Running Binning (MetaWRAP)..." 
                     run_metawrap_sample "$SAMPLE" "$ASSEMBLY_FA" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "${METAWRAP_DIR}/${SAMPLE}" "$MIN_COMPLETENESS" "$MAX_CONTAMINATION" "$THREADS" "$METAWRAP_BINNING_EXTRA_OPTS" "$METAWRAP_REFINEMENT_EXTRA_OPTS"
-                    if [[ -d "$FINAL_BINS_DIR" && -n "$(ls -A "$FINAL_BINS_DIR" 2>/dev/null)" ]]; then touch "$BINNING_SUCCESS_FLAG"; else log_warn "Binning for ${SAMPLE} failed."; continue; fi
+                    
+                    if [[ -d "$FINAL_BINS_DIR" && -n "$(ls -A "$FINAL_BINS_DIR" 2>/dev/null)" ]]; then 
+                        touch "$BINNING_SUCCESS_FLAG"; 
+                    else 
+                        log_warn "Binning finished but no MAGs found for ${SAMPLE}. (Not an error, just low quality)"
                 fi
+            fi
+        fi
 
                 # 5. GTDB-Tk 단계
                 # .success 플래그와 실제 결과 파일(summary.tsv) 존재 여부를 함께 확인
@@ -752,7 +754,13 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                             run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
                         ) 9>"$HEAVY_JOB_LOCK"
 
-                        if [[ -f "$GTDBTK_SUMMARY_FILE_BAC" || -f "$GTDBTK_SUMMARY_FILE_AR" ]]; then touch "$GTDBTK_SUCCESS_FLAG"; else log_warn "GTDB-Tk for ${SAMPLE} failed."; fi
+                        if [[ -s "$GTDBTK_SUMMARY_FILE_BAC" || -s "$GTDBTK_SUMMARY_FILE_AR" ]]; then 
+                            touch "$GTDBTK_SUCCESS_FLAG"
+                            log_info "GTDB-Tk Classification Success."
+                        else 
+                            log_warn "GTDB-Tk finished but no summary file found (Classification Failed)."
+                            # 플래그 생성 안 함 -> Bakta 실행 안 됨
+                        fi
                     fi
                 fi
                 
@@ -764,10 +772,11 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                         set_job_status "$SAMPLE" "Running Bakta on MAGs..."
                         run_bakta_for_mags "$SAMPLE" "$FINAL_BINS_DIR" "${BAKTA_ON_MAGS_DIR}/${SAMPLE}" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
                         touch "$BAKTA_MAGS_SUCCESS_FLAG"
+                    else
+                        log_warn "Skipping Bakta because GTDB-Tk classification failed (No Success Flag)."
                     fi
                 fi
             fi
-        fi
         if [ "$KEEP_TEMP_FILES" = false ]; then
             rm -rf "$REPAIR_DIR_SAMPLE"
         fi
