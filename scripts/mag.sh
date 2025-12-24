@@ -4,28 +4,15 @@
 #================================================
 set -euo pipefail
 
-cleanup_and_exit() {
-    echo ""
-    echo "🛑 [WARN] 강제 종료 신호 감지! 하위 프로세스를 정리합니다..."
-    
-    # 1. 대시보드가 켜져 있다면 끄기
-    if [[ -n "$DASHBOARD_PID" ]]; then
-        kill "$DASHBOARD_PID" 2>/dev/null
-    fi
-
-    # 2. 현재 스크립트가 실행한 작업들(MEGAHIT, MetaBAT 등)만 찾아서 종료
-    # (pkill -P $$ 보다 jobs -p가 더 안전하고 정확합니다)
-    pids=$(jobs -p)
-    if [[ -n "$pids" ]]; then
-        echo "   - Killing child processes: $pids"
-        kill -9 $pids 2>/dev/null
-    fi
-
-    exit 1
-}
-
-# 언제든(단독 실행이든 아니든) 신호를 받으면 청소하고 죽어라!
-trap cleanup_and_exit SIGINT SIGTERM
+# [scripts/qc.sh 와 scripts/mag.sh 상단에 넣을 코드]
+if [[ -z "${DOKKAEBI_MASTER_COMMAND:-}" ]]; then
+    _term_handler() {
+        echo "Local Abort."
+        pkill -9 -P $$
+        exit 1
+    }
+    trap _term_handler SIGINT SIGTERM
+fi
 
 : "${GTDBTK_DATA_PATH:=}"
 
@@ -563,7 +550,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     TEMP_NAME="${SAMPLE_BASE%_1.fastq.gz}"
     # 2. kneaddata, fastp 등 불필요한 꼬리표 제거 (깔끔한 이름 생성)
     SAMPLE=$(echo "$TEMP_NAME" | sed 's/_1_kneaddata_paired//' | sed 's/_kneaddata_paired//' | sed 's/_1_fastp//')
-    
+
     # 3. R2 파일 존재 여부 확인
     if [[ ! -f "$R2_QC_GZ" ]]; then 
         log_warn "Paired QC file for $SAMPLE not found. Expected: $(basename "$R2_QC_GZ")"
@@ -744,7 +731,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                     echo "[INFO] Binning done for ${SAMPLE}" >> "$LOG_FILE"
                 else
                     set_job_status "$SAMPLE" "Running Binning (MetaWRAP)..." 
-                    run_metawrap_sample "$SAMPLE" "$ASSEMBLY_FA" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "${METAWRAP_DIR}/${SAMPLE}" "$MIN_COMPLETENESS" "$MAX_CONTAMINATION" "$METAWRAP_BINNING_EXTRA_OPTS" "$METAWRAP_REFINEMENT_EXTRA_OPTS"
+                    run_metawrap_sample "$SAMPLE" "$ASSEMBLY_FA" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "${METAWRAP_DIR}/${SAMPLE}" "$MIN_COMPLETENESS" "$MAX_CONTAMINATION" "$THREADS" "$METAWRAP_BINNING_EXTRA_OPTS" "$METAWRAP_REFINEMENT_EXTRA_OPTS"
                     if [[ -d "$FINAL_BINS_DIR" && -n "$(ls -A "$FINAL_BINS_DIR" 2>/dev/null)" ]]; then touch "$BINNING_SUCCESS_FLAG"; else log_warn "Binning for ${SAMPLE} failed."; continue; fi
                 fi
 

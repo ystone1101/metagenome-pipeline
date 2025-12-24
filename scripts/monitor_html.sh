@@ -260,7 +260,7 @@ while true; do
 
     find "${MAG_BASE}" -path "*/02_assembly_stats/*_stats.txt" 2>/dev/null | while read -r stat_file; do
         if [ -f "$stat_file" ]; then
-            s_name=$(basename "$stat_file" | sed 's/_1_kneaddata_paired_assembly_stats.txt//' | sed 's/_assembly_stats.txt//')
+            s_name=$(basename "$stat_file" | sed 's/_assembly_stats.txt//')
             
             # [수정] Scaffold 대신 Contig 라인을 추출하도록 패턴 변경
             contig_total=$(grep "Main genome contig total:" "$stat_file" | awk '{print $NF}')
@@ -325,7 +325,7 @@ while true; do
     while read -r k2_file; do
         if [ -f "$k2_file" ]; then
             # 샘플명 추출 (테스트 확인 완료)
-            s_name=$(basename "$k2_file" | sed -E 's/(_1)?_kneaddata_paired_contigs\.k2report//')
+            s_name=$(basename "$k2_file" | sed 's/\.k2report//' | sed 's/_contigs//' | sed 's/_kneaddata_paired//')
             
             # [방금 터미널에서 성공한 그 코드] 정밀 수치 추출
             uncl_count=$(grep -P "^\s*\d+\.\d+\s+\d+\s+\d+\s+U\s" "$k2_file" | awk '{print $2}')

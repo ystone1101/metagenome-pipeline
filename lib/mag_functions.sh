@@ -86,7 +86,7 @@ run_megahit() {
 
 #--- Kraken2 on Contigs Function ---
 run_kraken2_on_contigs() {
-    local sample_name=$1; local assembly_file=$2; local kraken_out_dir=$3; local kraken_db=$4; local threads=$5; local extra_opts="${6:-}"
+    local sample_name=$1; local assembly_file=$2; local kraken_out_dir=$3; local kraken_db=$4; local threads=$5; local summary_tsv_file="${6:-}; local extra_opts="${7:-}"
     
     mkdir -p "$kraken_out_dir"
     
@@ -354,8 +354,9 @@ run_metawrap_sample() {
     local metawrap_sample_dir=$5
     local min_completeness=$6  
     local max_contamination=$7
-    local binning_extra_opts="${8:-}"
-    local refinement_extra_opts="${9:-}"
+    local threads="$8"
+    local binning_extra_opts="${9:-}"
+    local refinement_extra_opts="${10:-}"
 
     local final_bins_dir="${metawrap_sample_dir}/bin_refinement/metawrap_${min_completeness}_${max_contamination}_bins"
     
