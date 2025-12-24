@@ -229,7 +229,7 @@ mkdir -p "$P1_OUTPUT_DIR" "$P2_OUTPUT_DIR"
 LOG_FILE="${OUTPUT_DIR}/master_pipeline.log"
 touch "$LOG_FILE"
 
-QC_RETRY_COUNT=0; VERIFY_RETRY_COUNT=0; MAG_RETRY_COUNT=0; MAX_RETRIES=2; LOOP_SLEEP_SEC=1800
+QC_RETRY_COUNT=0; VERIFY_RETRY_COUNT=0; MAG_RETRY_COUNT=0; MAX_RETRIES=2; LOOP_SLEEP_SEC=10
 
 while true; do
     # =======================================================
@@ -413,66 +413,83 @@ while true; do
     # -------------------------------------------------------
     # [2단계] MAG 분석 실행
     # -------------------------------------------------------
-    log_info "--- [Phase 2] Running MAG Pipeline ---"
-    MAG_RETRY_COUNT=0
-
-    while [ "$MAG_RETRY_COUNT" -le "$MAX_RETRIES" ]; do
-        log_info "--- [Phase 2] Running MAG Pipeline (Attempt: $((MAG_RETRY_COUNT+1))) ---"
-
-        P2_CMD_ARRAY=(
-            bash "${PROJECT_ROOT_DIR}/scripts/mag.sh"
-            all --input_dir "${P1_CLEAN_READS_DIR}" --output_dir "${P2_OUTPUT_DIR}"
-            --raw_input_dir "${INPUT_DIR}"
-            --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}" --eggnog_db_dir "${EGGNOG_DB}"
-            --threads "${THREADS}" --memory_gb "${MEMORY_GB}"
-            --parallel-jobs "${PARALLEL_JOBS}"
-        )
-
-        if [ "$SKIP_CONTIG_ANALYSIS" = true ]; then
-            P2_CMD_ARRAY+=(--skip-contig-analysis)
-        fi
+    log_info "--- [Phase 2] Checking for pending MAG jobs ---"
+    
+    # 1. 미완료 샘플 식별
+    PENDING_SAMPLES=()
+    for clean_r1 in "${P1_CLEAN_READS_DIR}"/*_1.fastq.gz; do
+        [ -e "$clean_r1" ] || continue
+        # 파일명에서 샘플명 추출 (패턴 주의)
+        s_name=$(basename "$clean_r1" | sed 's/_1_kneaddata_paired_1.fastq.gz//' | sed 's/_1.fastq.gz//')
         
-        # Annotation 스킵 옵션 전달
-        if [ "$SKIP_ANNOTATION" = true ]; then
-            P2_CMD_ARRAY+=(--skip-annotation)
-        fi
-
-        if [[ -n "$MEGAHIT_OPTS" ]]; then P2_CMD_ARRAY+=(--megahit-opts "$MEGAHIT_OPTS"); fi
-        if [[ -n "$METAWRAP_BINNING_OPTS" ]]; then P2_CMD_ARRAY+=(--metawrap-binning-opts "$METAWRAP_BINNING_OPTS"); fi
-        if [[ -n "$METAWRAP_REFINEMENT_OPTS" ]]; then P2_CMD_ARRAY+=(--metawrap-refinement-opts "$METAWRAP_REFINEMENT_OPTS"); fi
-        if [[ -n "$KRAKEN2_OPTS" ]]; then P2_CMD_ARRAY+=(--kraken2-opts "$KRAKEN2_OPTS"); fi
-        if [[ -n "$GTDBTK_OPTS" ]]; then P2_CMD_ARRAY+=(--gtdbtk-opts "$GTDBTK_OPTS"); fi
-        if [[ -n "$BAKTA_OPTS" ]]; then P2_CMD_ARRAY+=(--bakta-opts "$BAKTA_OPTS"); fi
-        if [[ -n "$EGGNOG_OPTS" ]]; then P2_CMD_ARRAY+=(--eggnog-opts "$EGGNOG_OPTS"); fi
-
-        # 1. MAG 실행
-        if "${P2_CMD_ARRAY[@]}"; then
-            MAG_RETRY_COUNT=0 # 성공하면 카운터 리셋
-            break # MAG 루프 탈출 (다음 단계로 이동)
-        else
-            # 2. 실패 또는 인터럽트 신호 처리
-            MAG_RETURN_CODE=$? # 종료 코드 캡처
-            
-            if [ "$MAG_RETURN_CODE" -eq 99 ]; then
-                log_warn "MAG run interrupted by new input. Restarting QC phase."
-                MAG_RETRY_COUNT=0 # 카운트 리셋
-                break # MAG 루프 탈출 (다음 단계로 이동)
-            fi
-
-            # 3. 영구 실패 처리 (기존 로직 유지)
-            #((MAG_RETRY_COUNT++))
-            MAG_RETRY_COUNT=$((MAG_RETRY_COUNT + 1))
-            log_error "Pipeline 2 failed (Failure Count: $MAG_RETRY_COUNT / $MAX_RETRIES)."
-            
-            if [ "$MAG_RETRY_COUNT" -gt "$MAX_RETRIES" ]; then
-                log_error "CRITICAL: MAG failed $MAX_RETRIES times consecutively. Aborting."
-                exit 1 
-            fi
-            
-            log_info "Retrying MAG in 60s..."
-            sleep 60
+        # Annotation 결과 없으면 추가
+        if [ ! -d "${P2_OUTPUT_DIR}/05_annotation/${s_name}" ]; then
+            PENDING_SAMPLES+=("$s_name")
         fi
     done
+
+    # 2. 작업이 있을 때만 실행
+    if [ ${#PENDING_SAMPLES[@]} -gt 0 ]; then
+        
+        REAL_BATCH_SIZE=${PARALLEL_JOBS:-1}
+        TARGETS=("${PENDING_SAMPLES[@]:0:$REAL_BATCH_SIZE}")
+
+        log_info "🚀 Detected Pending Jobs (${#PENDING_SAMPLES[@]} total): Processing batch: ${TARGETS[*]}"
+
+        # [임시 폴더 생성 및 링크]
+        TEMP_MAG_INPUT="/tmp/dokkaebi_mag_run_$$"
+        rm -rf "$TEMP_MAG_INPUT" && mkdir -p "$TEMP_MAG_INPUT"
+
+        for s in "${TARGETS[@]}"; do
+            find "${P1_CLEAN_READS_DIR}" -name "${s}*_1.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_1.fastq.gz" \;
+            find "${P1_CLEAN_READS_DIR}" -name "${s}*_2.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_2.fastq.gz" \;
+        done
+
+        # 3. MAG 파이프라인 실행
+        MAG_RETRY_COUNT=0
+        while [ "$MAG_RETRY_COUNT" -le "$MAX_RETRIES" ]; do
+            
+            P2_CMD_ARRAY=(
+                bash "${PROJECT_ROOT_DIR}/scripts/mag.sh"
+                all 
+                --input_dir "${TEMP_MAG_INPUT}" 
+                --output_dir "${P2_OUTPUT_DIR}"
+                --raw_input_dir "${INPUT_DIR}"
+                --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}" --eggnog_db_dir "${EGGNOG_DB}"
+                --threads "${THREADS}" --memory_gb "${MEMORY_GB}"
+                --parallel-jobs "${REAL_BATCH_SIZE}"
+                --annotation-tool "${ANNOTATION_TOOL:-eggnog}"
+            )
+
+            # 옵션 추가
+            if [ "$SKIP_CONTIG_ANALYSIS" = true ]; then P2_CMD_ARRAY+=(--skip-contig-analysis); fi
+            if [ "$SKIP_ANNOTATION" = true ]; then P2_CMD_ARRAY+=(--skip-annotation); fi
+            [[ -n "$MEGAHIT_OPTS" ]] && P2_CMD_ARRAY+=(--megahit-opts "$MEGAHIT_OPTS")
+            [[ -n "$KRAKEN2_OPTS" ]] && P2_CMD_ARRAY+=(--kraken2-opts "$KRAKEN2_OPTS")
+            [[ -n "$METAWRAP_BINNING_OPTS" ]] && P2_CMD_ARRAY+=(--metawrap-binning-opts "$METAWRAP_BINNING_OPTS")
+            [[ -n "$METAWRAP_REFINEMENT_OPTS" ]] && P2_CMD_ARRAY+=(--metawrap-refinement-opts "$METAWRAP_REFINEMENT_OPTS")
+            [[ -n "$GTDBTK_OPTS" ]] && P2_CMD_ARRAY+=(--gtdbtk-opts "$GTDBTK_OPTS")
+            [[ -n "$BAKTA_OPTS" ]] && P2_CMD_ARRAY+=(--bakta-opts "$BAKTA_OPTS")
+            [[ -n "$EGGNOG_OPTS" ]] && P2_CMD_ARRAY+=(--eggnog-opts "$EGGNOG_OPTS")
+
+            if "${P2_CMD_ARRAY[@]}"; then
+                MAG_RETRY_COUNT=0
+                break 
+            else
+                MAG_RETURN_CODE=$?
+                if [ "$MAG_RETURN_CODE" -eq 99 ]; then 
+                    log_warn "MAG run interrupted."
+                    break
+                fi
+                MAG_RETRY_COUNT=$((MAG_RETRY_COUNT + 1))
+                log_error "MAG Batch Failed ($MAG_RETRY_COUNT/$MAX_RETRIES)."
+                sleep 60
+            fi
+        done
+        rm -rf "$TEMP_MAG_INPUT"
+    else
+        log_info "No pending MAG jobs. Everything is up to date."
+    fi
 
     # =======================================================
     # [수정] 리포트 생성을 루프 안으로 이동 (매 사이클마다 갱신)
@@ -513,8 +530,8 @@ while true; do
     # -------------------------------------------------------
     # [5단계] CPU 과부하 방지를 위한 휴식 (Sleep)
     # -------------------------------------------------------
-    # [설정] 대기 시간 (1800초 = 30분) - 필요에 따라 조절하세요
-    # LOOP_SLEEP_SEC=1800 
+    # [설정] 대기 시간 (30초) - 필요에 따라 조절하세요
+    # LOOP_SLEEP_SEC=10 
     
     log_info "Cycle complete. Sleeping for ${LOOP_SLEEP_SEC} seconds before next check..."
     log_info "(To stop safely, create a file named 'stop_pipeline' in the input dir)"
