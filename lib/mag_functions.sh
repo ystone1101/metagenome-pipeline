@@ -600,7 +600,7 @@ run_eggnog_on_contigs() {
         log_warn "${sample_name}: Found existing protein file but no annotation. Deleting to regenerate safely."
         rm -f "$protein_file" "$gene_file" "$gff_file"
     fi
-    
+
     # 1. Prodigal 실행 (유전자/단백질 서열 추출)
     # (Bakta 환경엔 prodigal 바이너리가 없을 수 있으므로 GTDBTK_ENV 사용)
     if [[ ! -f "$protein_file" ]]; then
@@ -631,6 +631,11 @@ run_eggnog_on_contigs() {
             --tax_scope auto \
             --override $extra_opts >> "$LOG_FILE" 2>&1
     )
+    
+    if [ $? -ne 0 ]; then
+        log_error "EggNOG-mapper failed for ${sample_name}."
+        return 1
+    fi
     
     log_info "${sample_name}: EggNOG annotation finished."
 
