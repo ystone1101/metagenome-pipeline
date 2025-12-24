@@ -519,7 +519,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     fi
 
     # [1. 대기열 관리] 설정한 작업 수만큼만 동시에 실행되도록 대기
-    while [ $(jobs -p | grep -v "$DASHBOARD_PID" | wc -l) -ge "$MAX_MAG_JOBS" ]; do
+    while [ $(jobs -p | grep -v "${DASHBOARD_PID:-IGNORE}" | wc -l) -ge "$MAX_MAG_JOBS" ]; do
         if [ -f "$RESTART_SIGNAL_FILE" ]; then
             log_warn "Restart signal detected while waiting for slots."
             break 2 # while 루프와 바깥의 for 루프까지 한 번에 탈출!
@@ -555,13 +555,14 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     if [[ ! -f "$R1_QC_GZ" ]]; then continue; fi
 
     SAMPLE_BASE=$(basename "$R1_QC_GZ")
-    
-    # 1. 파일명 끝의 _1.fastq.gz 패턴을 제거하여 샘플명(SAMPLE) 추출
-    # 예: SampleA_kneaddata_paired_1.fastq.gz -> SampleA_kneaddata_paired
-    SAMPLE="${SAMPLE_BASE%_1.fastq.gz}"
-    
+        
     # 2. R2 파일 경로 추론 (샘플명 + _2.fastq.gz)
-    R2_QC_GZ="${QC_READS_DIR}/${SAMPLE}_2.fastq.gz"
+    R2_BASE="${SAMPLE_BASE/_1.fastq.gz/_2.fastq.gz}"
+    R2_QC_GZ="${QC_READS_DIR}/${R2_BASE}"
+    
+    TEMP_NAME="${SAMPLE_BASE%_1.fastq.gz}"
+    # 2. kneaddata, fastp 등 불필요한 꼬리표 제거 (깔끔한 이름 생성)
+    SAMPLE=$(echo "$TEMP_NAME" | sed 's/_1_kneaddata_paired//' | sed 's/_kneaddata_paired//' | sed 's/_1_fastp//')
     
     # 3. R2 파일 존재 여부 확인
     if [[ ! -f "$R2_QC_GZ" ]]; then 
