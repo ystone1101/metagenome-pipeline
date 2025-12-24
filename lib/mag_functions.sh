@@ -588,13 +588,19 @@ run_eggnog_on_contigs() {
     local gene_file="${out_dir}/${sample_name}.ffn"
     local gff_file="${out_dir}/${sample_name}.gff"
     local eggnog_output_prefix="${out_dir}/${sample_name}"
+    local annotations_file="${eggnog_output_prefix}.emapper.annotations"
 
     # Checkpoint
-    if [[ -f "${eggnog_output_prefix}.emapper.annotations" ]]; then
+    if [[ -f "$annotations_file" ]]; then
         echo "[INFO] EggNOG annotation for ${sample_name} already exists. Skipping." >> "$LOG_FILE"
         return 0
     fi
 
+    if [[ -f "$protein_file" ]]; then
+        log_warn "${sample_name}: Found existing protein file but no annotation. Deleting to regenerate safely."
+        rm -f "$protein_file" "$gene_file" "$gff_file"
+    fi
+    
     # 1. Prodigal 실행 (유전자/단백질 서열 추출)
     # (Bakta 환경엔 prodigal 바이너리가 없을 수 있으므로 GTDBTK_ENV 사용)
     if [[ ! -f "$protein_file" ]]; then
