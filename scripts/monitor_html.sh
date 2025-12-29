@@ -155,6 +155,20 @@ try:
                 plt.savefig(os.path.join(output_dir, 'assembly_n50.png'), dpi=150, bbox_inches='tight')
                 plt.close()
 
+    # [4] Annotation Rate Bar Chart 추가
+    eggnog_file = os.path.join(output_dir, "eggnog_annotation_summary.csv")
+    if os.path.exists(eggnog_file):
+        df_egg = pd.read_csv(eggnog_file)
+        if not df_egg.empty:
+            fig, ax = plt.subplots(figsize=(6, 5), facecolor='white')
+            df_egg = df_egg.sort_values(by='Ratio(%)', ascending=True)
+            colors = [COLOR_PASS if r >= 80 else (COLOR_WARN if r >= 50 else COLOR_FAIL) for r in df_egg['Ratio(%)']]
+            ax.barh(df_egg['Sample_ID'], df_egg['Ratio(%)'], color=colors)
+            ax.set_title('Contig Annotation Rate (EggNOG)', fontweight='bold')
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_dir, 'eggnog_rate.png'), dpi=150)
+            plt.close()
+
 except Exception as e:
     print(str(e), file=sys.stderr)
 PY_EOF
@@ -199,20 +213,88 @@ while true; do
     # 2. 파일이 1개라도 생겼거나, 혹은 지금 막 프로세스가 시작되었는가?
     elif [ -n "$IS_ASM_RUNNING" ] || [ "$COUNT_ASM" -gt 0 ]; then 
         STATUS_ASM="RUNNING"
-# 3. 그 외에는 아직 시작 전임
+    # 3. 그 외에는 아직 시작 전임
     else 
         STATUS_ASM="IDLE"
     fi
 
-    COUNT_MAG=$(find "$MAG_BASE" -name "gtdbtk.*.summary.tsv" 2>/dev/null | wc -l); PCT_MAG=$(( (COUNT_MAG * 100) / TOTAL_SAMPLES ))
-    if [ "$COUNT_MAG" -gt 0 ] && [ "$COUNT_MAG" -lt "$TOTAL_SAMPLES" ]; then STATUS_MAG="RUNNING"; 
-    elif [ "$COUNT_MAG" -eq "$TOTAL_SAMPLES" ] && [ "$TOTAL_SAMPLES" -gt 1 ]; then STATUS_MAG="DONE"; 
-    else STATUS_MAG="IDLE"; fi
+    COUNT_MAG=$(find "$MAG_BASE" -path "*/05_metawrap/*.binning.success" 2>/dev/null | wc -l)
+    PCT_MAG=$(( (COUNT_MAG * 100) / TOTAL_SAMPLES ))
+    if [ "$COUNT_MAG" -eq "$TOTAL_SAMPLES" ] && [ "$TOTAL_SAMPLES" -gt 0 ]; then 
+        STATUS_MAG="DONE"
+    elif [ -n "$IS_ASM_RUNNING" ] || [ "$COUNT_MAG" -gt 0 ]; then 
+        STATUS_MAG="RUNNING"
+    else 
+        STATUS_MAG="IDLE"
+    fi
 
-    COUNT_FUNC=$(find "$MAG_BASE" -name "*.gff3" -o -name "*.emapper.annotations" 2>/dev/null | wc -l); PCT_FUNC=$(( (COUNT_FUNC * 100) / TOTAL_SAMPLES ))
-    if [ "$COUNT_FUNC" -gt 0 ] && [ "$COUNT_FUNC" -lt "$TOTAL_SAMPLES" ]; then STATUS_FUNC="RUNNING"; 
-    elif [ "$COUNT_FUNC" -eq "$TOTAL_SAMPLES" ] && [ "$TOTAL_SAMPLES" -gt 1 ]; then STATUS_FUNC="DONE"; 
-    else STATUS_FUNC="IDLE"; fi
+    # [수정] 5. Contig Annotation (EggNOG on Contigs)
+    # 04_eggnog_on_contigs 폴더 내의 결과 파일만 집계
+    COUNT_CT_ANNO=$(find "$MAG_BASE" -path "*/04_eggnog_on_contigs/*.emapper.annotations" 2>/dev/null | wc -l)
+    PCT_CT_ANNO=$(( (COUNT_CT_ANNO * 100) / TOTAL_SAMPLES ))
+    
+    if [ "$COUNT_CT_ANNO" -eq "$TOTAL_SAMPLES" ] && [ "$TOTAL_SAMPLES" -gt 0 ]; then 
+        STATUS_CT_ANNO="DONE"
+    elif [ -n "$IS_ASM_RUNNING" ] || [ "$COUNT_CT_ANNO" -gt 0 ]; then 
+        STATUS_CT_ANNO="RUNNING"
+    else 
+        STATUS_CT_ANNO="IDLE"
+    fi
+
+    # [수정] 6. MAG Annotation (Bakta on MAGs)
+    # 07_bakta_on_mags 폴더 내의 결과 파일(.gff3)만 집계
+    COUNT_MAG_ANNO=$(find "$MAG_BASE" -path "*/07_bakta_on_mags/*.*.bakta_mags.success" 2>/dev/null | wc -l)
+    PCT_MAG_ANNO=$(( (COUNT_MAG_ANNO * 100) / TOTAL_SAMPLES ))
+
+    if [ "$COUNT_MAG_ANNO" -eq "$TOTAL_SAMPLES" ] && [ "$TOTAL_SAMPLES" -gt 0 ]; then 
+        STATUS_MAG_ANNO="DONE"
+    elif [ -n "$IS_ASM_RUNNING" ] || [ "$COUNT_MAG_ANNO" -gt 0 ]; then 
+        STATUS_MAG_ANNO="RUNNING"
+    else 
+        STATUS_MAG_ANNO="IDLE"
+    fi
+
+# ==========================================================================
+    # [최종 통합] EggNOG CSV 복구, PASS/주의 판별, 자연 정렬 로직
+    # ==========================================================================
+    E_SUMMARY_FILE="${BASE_DIR}/2_mag_analysis/eggnog_annotation_summary.csv"
+    
+    # 1. 파일이 없으면 헤더 생성
+    if [ ! -f "$E_SUMMARY_FILE" ]; then
+        echo "Sample_ID,Total_Genes,Annotated_Genes,Ratio(%),Status" > "$E_SUMMARY_FILE"
+    fi
+
+    # 2. .annotations 파일을 찾아 누락된 샘플 보충 (80% 기준 PASS/주의 적용)
+    find "$MAG_BASE" -path "*/04_eggnog_on_contigs/*/*.emapper.annotations" 2>/dev/null | while read -r annot_file; do
+        s_name=$(basename "$annot_file" .emapper.annotations)
+        
+        # CSV에 이미 이름이 있는지 확인 (있으면 건너뜀)
+        if ! grep -q "^${s_name}," "$E_SUMMARY_FILE" 2>/dev/null; then
+            prot_file="${annot_file%.emapper.annotations}.faa"
+            if [ -f "$prot_file" ]; then
+                t_g=$(grep -c "^>" "$prot_file")
+                a_g=$(grep -v "^#" "$annot_file" | wc -l)
+                if [ "$t_g" -gt 0 ]; then
+                    ratio=$(echo "scale=2; ($a_g * 100) / $t_g" | bc -l)
+                    # 80% 기준 판별 (bc 사용)
+                    is_ok=$(echo "$ratio >= 80.00" | bc -l)
+                    [ "$is_ok" -eq 1 ] && stat_msg="PASS" || stat_msg="WARNING"
+                    echo "${s_name},${t_g},${a_g},${ratio},${stat_msg}" >> "$E_SUMMARY_FILE"
+                fi
+            fi
+        fi
+    done
+
+    # 3. 샘플명 자연 정렬 (Sample_1, Sample_2, Sample_10 순서 보장)
+    if [ -s "$E_SUMMARY_FILE" ]; then
+        header_line=$(head -n 1 "$E_SUMMARY_FILE")
+        # 헤더 빼고 1열 기준 정렬(-V) 후 합치기
+        (echo "$header_line"; tail -n +2 "$E_SUMMARY_FILE" | sort -t',' -k1,1 -V) > "${E_SUMMARY_FILE}.tmp"
+        mv "${E_SUMMARY_FILE}.tmp" "$E_SUMMARY_FILE"
+    fi
+
+    # 4. 웹 모니터링 폴더로 복사 (이걸 해야 웹에서 'No data'가 안 뜹니다)
+    cp "$E_SUMMARY_FILE" "${WEB_DIR}/eggnog_annotation_summary.csv" 2>/dev/null
 
     # --------------------------------------------------------------------------
     # [프로세스 체크 및 파일 업데이트]
@@ -477,13 +559,22 @@ while true; do
                             </div>
                             $(if [ "$STATUS_MAG" == "RUNNING" ]; then echo "<span class='badge bg-primary px-3 py-2'>RUNNING</span>"; elif [ "$STATUS_MAG" == "DONE" ]; then echo "<span class='badge bg-success px-3 py-2'>DONE</span>"; else echo "<span class='badge bg-secondary px-3 py-2'>IDLE</span>"; fi)
                         </div>
-                        <div class="mb-0">
-                            <div class="d-flex justify-content-between small fw-bold mb-1"><span>5️⃣ Annotation</span><span class="text-neon">$PCT_FUNC%</span></div>
+                        <div class="mb-4">
+                            <div class="d-flex justify-content-between small fw-bold mb-1"><span>5️⃣ Contig Annotation</span><span class="text-neon">$PCT_CT_ANNO%</span></div>
                             <div class="progress mb-2">
-                                <span class="progress-text">$COUNT_FUNC / $TOTAL_SAMPLES</span>
-                                <div class="progress-bar bg-neon progress-bar-striped progress-bar-animated" style="width: $PCT_FUNC%"></div>
+                                <span class="progress-text">$COUNT_CT_ANNO / $TOTAL_SAMPLES</span>
+                                <div class="progress-bar bg-warning progress-bar-striped progress-bar-animated" style="width: $PCT_CT_ANNO%"></div>
                             </div>
-                            $(if [ "$STATUS_FUNC" == "RUNNING" ]; then echo "<span class='badge bg-primary px-3 py-2'>RUNNING</span>"; elif [ "$STATUS_FUNC" == "DONE" ]; then echo "<span class='badge bg-success px-3 py-2'>DONE</span>"; else echo "<span class='badge bg-secondary px-3 py-2'>IDLE</span>"; fi)
+                            $(if [ "$STATUS_CT_ANNO" == "DONE" ]; then echo "<span class='badge bg-success px-3 py-2'>DONE</span>"; elif [ "$STATUS_CT_ANNO" == "RUNNING" ]; then echo "<span class='badge bg-primary px-3 py-2'>RUNNING</span>"; else echo "<span class='badge bg-secondary px-3 py-2'>IDLE</span>"; fi)
+                        </div>
+
+                        <div class="mb-0">
+                            <div class="d-flex justify-content-between small fw-bold mb-1"><span>6️⃣ MAG Annotation</span><span class="text-neon">$PCT_MAG_ANNO%</span></div>
+                            <div class="progress mb-2">
+                                <span class="progress-text">$COUNT_MAG_ANNO / $TOTAL_SAMPLES</span>
+                                <div class="progress-bar bg-danger progress-bar-striped progress-bar-animated" style="width: $PCT_MAG_ANNO%"></div>
+                            </div>
+                            $(if [ "$STATUS_MAG_ANNO" == "DONE" ]; then echo "<span class='badge bg-success px-3 py-2'>DONE</span>"; elif [ "$STATUS_MAG_ANNO" == "RUNNING" ]; then echo "<span class='badge bg-primary px-3 py-2'>RUNNING</span>"; else echo "<span class='badge bg-secondary px-3 py-2'>IDLE</span>"; fi)
                         </div>
                     </div> </div> </div> <div class="col-lg-6">
                 <div class="card border-neon shadow-lg">
@@ -525,6 +616,7 @@ while true; do
                             <li class="nav-item"><button class="nav-link small" data-bs-toggle="tab" data-bs-target="#c-kr">Taxonomy (Read)</button></li>
                             <li class="nav-item"><button class="nav-link small" data-bs-toggle="tab" data-bs-target="#c-as">Assembly Stats</button></li>
                             <li class="nav-item"><button class="nav-link small" data-bs-toggle="tab" data-bs-target="#c-ct-kr">Taxonomy (Contig)</button></li>
+                            <li class="nav-item"><button class="nav-link small" data-bs-toggle="tab" data-bs-target="#c-egg">Annotation Summary</button></li>
                         </ul>
                         <div class="tab-content pt-2">
                             <div class="tab-pane fade show active" id="c-qc">
@@ -542,6 +634,10 @@ while true; do
                             <div class="tab-pane fade" id="c-ct-kr">
                                 <div class="text-end mb-1"><a href="kraken2_contig_summary.tsv" class="text-neon text-decoration-none small" download>📥 Download TSV</a></div>
                                 $(csv_to_html "${WEB_DIR}/kraken2_contig_summary.tsv" "\t")
+                            </div>
+                            <div class="tab-pane fade" id="c-egg">
+                                <div class="text-end mb-1"><a href="eggnog_annotation_summary.csv" class="text-neon text-decoration-none small" download>📥 Download CSV</a></div>
+                                $(csv_to_html "${WEB_DIR}/eggnog_annotation_summary.csv" ",")
                             </div>
                         </div>
                     </div>
