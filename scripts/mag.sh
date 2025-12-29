@@ -753,40 +753,41 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                 else
                     if [ -f "$GTDBTK_SUCCESS_FLAG" ] && { [ -f "$GTDBTK_SUMMARY_FILE_BAC" ] || [ -f "$GTDBTK_SUMMARY_FILE_AR" ]; }; then
                         echo "[INFO] GTDB-Tk done for ${SAMPLE}" >> "$LOG_FILE"
-                    else
-                        if [ -f "$BINNING_SUCCESS_FLAG" ]; then
-                            set_job_status "$SAMPLE" "Waiting for GTDB-Tk Slot..."
-                            (
-                                flock 9
-                                set_job_status "$SAMPLE" "Running GTDB-Tk..."
-                                run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS" "$GTDBTK_DATA_PATH" >> "$LOG_FILE" 2>&1
-                            ) 9>"$HEAVY_JOB_LOCK"
-                            
-                            if [[ -s "$GTDBTK_SUMMARY_FILE_BAC" || -s "$GTDBTK_SUMMARY_FILE_AR" ]]; then 
-                                touch "$GTDBTK_SUCCESS_FLAG"
-                            fi
+                    elif [ -f "$BINNING_SUCCESS_FLAG" ]; then
+                        set_job_status "$SAMPLE" "Waiting for GTDB-Tk Slot..."
+                        (
+                            flock 9
+                            set_job_status "$SAMPLE" "Running GTDB-Tk..."
+                            run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS" "$GTDBTK_DATA_PATH" >> "$LOG_FILE" 2>&1
+                        ) 9>"$HEAVY_JOB_LOCK"
+
+                        if [[ -s "$GTDBTK_SUMMARY_FILE_BAC" || -s "$GTDBTK_SUMMARY_FILE_AR" ]]; then 
+                            touch "$GTDBTK_SUCCESS_FLAG"
+                            log_info "GTDB-Tk Classification Success."
+                        else 
+                            log_warn "GTDB-Tk finished but no summary file found (Classification Failed)."
+                            # 플래그 생성 안 함 -> Bakta 실행 안 됨
                         fi
                     fi
                 fi
                 
                 # 6. Bakta on MAGs 단계 (이 단계는 여러 파일을 생성하므로 .success 플래그만으로 확인)
-
                 if [[ "$SKIP_BAKTA" == "true" ]]; then
                     log_info "Skipping Bakta for MAGs as requested."
                 else
                     if [ -f "$BAKTA_MAGS_SUCCESS_FLAG" ]; then 
                         echo "[INFO] Bakta on MAGs done for ${SAMPLE}" >> "$LOG_FILE"
-                    else
-                        if [ -f "$GTDBTK_SUCCESS_FLAG" ] || [[ "$SKIP_GTDBTK" == "true" ]]; then
+                    elif [ -f "$GTDBTK_SUCCESS_FLAG" ]; then
+                            if [ -f "$GTDBTK_SUCCESS_FLAG" ] || [[ "$SKIP_GTDBTK" == "true" ]]; then
                             set_job_status "$SAMPLE" "Running Bakta on MAGs..."
                             run_bakta_for_mags "$SAMPLE" "$FINAL_BINS_DIR" "${BAKTA_ON_MAGS_DIR}/${SAMPLE}" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
                             touch "$BAKTA_MAGS_SUCCESS_FLAG"
                         fi
+                        log_warn "Skipping Bakta because GTDB-Tk classification failed (No Success Flag)."
                     fi
                 fi
             fi
         fi
-        
         if [ "$KEEP_TEMP_FILES" = false ]; then
             rm -rf "$REPAIR_DIR_SAMPLE"
         fi
