@@ -548,7 +548,10 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
 
     # 2. R2 파일 경로 추론 (샘플명 + _2.fastq.gz)
     R2_QC_GZ="${R1_QC_GZ/_1.fastq.gz/_2.fastq.gz}"
-    
+
+    echo ">>> [CHECK] Sample ID: $SAMPLE"
+    echo ">>> [CHECK] Output Dir: $ASSEMBLY_OUT_DIR_SAMPLE"
+
     # 3. R2 파일 존재 여부 확인
     if [[ ! -f "$R2_QC_GZ" ]]; then 
         log_warn "Paired QC file for $SAMPLE not found. Expected: $(basename "$R2_QC_GZ")"
