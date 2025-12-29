@@ -633,15 +633,25 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         else
             GTDBTK_OUT_DIR_SAMPLE="${GTDBTK_ON_MAGS_DIR}/${SAMPLE}"; mkdir -p "$GTDBTK_OUT_DIR_SAMPLE"
 
-            set_job_status "$SAMPLE" "Waiting for GTDB-Tk Slot..."
-            (
-                flock 9    
-                set_job_status "$SAMPLE" "Running GTDB-Tk..."
-                run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS" "$GTDBTK_DATA_PATH"
-            ) 9>"$HEAVY_JOB_LOCK"
+            # --- [수정] GTDB-Tk 스킵 로직 추가 ---
+            if [[ "$SKIP_GTDBTK" == "true" ]]; then
+                log_info "Skipping GTDB-Tk analysis for ${SAMPLE} (Post-process mode)."
+            else
+                set_job_status "$SAMPLE" "Waiting for GTDB-Tk Slot..."
+                (
+                    flock 9    
+                    set_job_status "$SAMPLE" "Running GTDB-Tk..."
+                    run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS" "$GTDBTK_DATA_PATH"
+                ) 9>"$HEAVY_JOB_LOCK"
+            fi
 
-            BAKTA_MAGS_OUT_DIR_SAMPLE="${BAKTA_ON_MAGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_MAGS_OUT_DIR_SAMPLE"
-            run_bakta_for_mags "$SAMPLE" "$FINAL_BINS_DIR" "$BAKTA_MAGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
+            # --- [수정] Bakta 스킵 로직 추가 ---
+            if [[ "$SKIP_BAKTA" == "true" ]]; then
+                log_info "Skipping Bakta analysis for ${SAMPLE} (Post-process mode)."
+            else
+                BAKTA_MAGS_OUT_DIR_SAMPLE="${BAKTA_ON_MAGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_MAGS_OUT_DIR_SAMPLE"
+                run_bakta_for_mags "$SAMPLE" "$FINAL_BINS_DIR" "$BAKTA_MAGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS"
+            fi
         fi
 
     else
@@ -725,7 +735,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                 fi
             fi
         fi
-        
+        # --- 4. Binning 및 후속 분석 ---
         if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "metawrap" ]]; then
             if [[ ! -f "$ASSEMBLY_FA" ]]; then 
                 log_warn "Assembly file ($ASSEMBLY_FA) not found. Skipping binning.";
@@ -791,7 +801,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                 fi
             fi
         fi
-        
+
         if [ "$KEEP_TEMP_FILES" = false ]; then
             rm -rf "$REPAIR_DIR_SAMPLE"
         fi

@@ -173,8 +173,8 @@ while [ $# -gt 0 ]; do
         --metawrap-refinement-opts) METAWRAP_REFINEMENT_OPTS="$2"; shift 2 ;;
         --skip-contig-analysis) SKIP_CONTIG_ANALYSIS=true; shift ;;
         --skip-annotation) SKIP_ANNOTATION=true; shift ;;
-        --skip-gtdbtk) SKIP_GTDBTK=true MAG_EXTRA_OPTS+=( "--skip-gtdbtk" ) shift ;;
-        --skip-bakta) SKIP_BAKTA=true MAG_EXTRA_OPTS+=( "--skip-bakta" ) shift ;;
+        --skip-gtdbtk) SKIP_GTDBTK=true; MAG_EXTRA_OPTS+=("--skip-gtdbtk"); shift ;;
+        --skip-bakta) SKIP_BAKTA=true; MAG_EXTRA_OPTS+=("--skip-bakta"); shift ;;
         --annotation-tool) ANNOTATION_TOOL="$2"; shift 2 ;;    
         --gtdbtk-opts) GTDBTK_OPTS="$2"; shift 2 ;;
         --eggnog-opts) EGGNOG_OPTS="$2"; shift 2 ;;
