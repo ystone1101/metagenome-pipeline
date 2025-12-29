@@ -784,6 +784,9 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                         fi
                     fi
                 fi
+            fi
+        fi
+        
         if [ "$KEEP_TEMP_FILES" = false ]; then
             rm -rf "$REPAIR_DIR_SAMPLE"
         fi
