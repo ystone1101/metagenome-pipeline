@@ -149,7 +149,9 @@ METAWRAP_REFINEMENT_OPTS=""; GTDBTK_OPTS=""; BAKTA_OPTS=""; EGGNOG_OPTS=""
 
 SKIP_CONTIG_ANALYSIS=false
 SKIP_ANNOTATION=false
-VERBOSE_MODE=false 
+VERBOSE_MODE=false
+SKIP_GTDBTK=false
+SKIP_BAKTA=false
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -171,11 +173,12 @@ while [ $# -gt 0 ]; do
         --metawrap-refinement-opts) METAWRAP_REFINEMENT_OPTS="$2"; shift 2 ;;
         --skip-contig-analysis) SKIP_CONTIG_ANALYSIS=true; shift ;;
         --skip-annotation) SKIP_ANNOTATION=true; shift ;;
+        --skip-gtdbtk) SKIP_GTDBTK=true MAG_EXTRA_OPTS+=( "--skip-gtdbtk" ) shift ;;
+        --skip-bakta) SKIP_BAKTA=true MAG_EXTRA_OPTS+=( "--skip-bakta" ) shift ;;
         --annotation-tool) ANNOTATION_TOOL="$2"; shift 2 ;;    
         --gtdbtk-opts) GTDBTK_OPTS="$2"; shift 2 ;;
         --eggnog-opts) EGGNOG_OPTS="$2"; shift 2 ;;
         --bakta-opts) BAKTA_OPTS="$2"; shift 2 ;;
-
         --verbose) VERBOSE_MODE=true; shift ;;
         *) shift ;;
     esac
@@ -471,6 +474,7 @@ while true; do
                     --threads "${THREADS}" --memory_gb "${MEMORY_GB}"
                     --parallel-jobs "${REAL_BATCH_SIZE}"
                     --annotation-tool "${ANNOTATION_TOOL:-eggnog}"
+                    "${MAG_EXTRA_OPTS[@]}"
                 )
 
                 # 옵션 추가
