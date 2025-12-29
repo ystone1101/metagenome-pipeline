@@ -146,7 +146,7 @@ while [ $# -gt 0 ]; do
         --test) RUN_TEST_MODE=true; shift ;;
         --keep-temp-files) KEEP_TEMP_FILES=true; shift ;;
         --skip-contig-analysis) SKIP_CONTIG_ANALYSIS=true; shift ;;
-        --skip-annotation) SKIP_BAKTA=true; shift ;;
+        --skip-annotation) SKIP_ANNOTATION=true; shift ;;
         --skip-gtdbtk) SKIP_GTDBTK=true; shift ;;
         --skip-bakta) SKIP_BAKTA=true; shift ;;     
         megahit|metawrap|all|post-process) RUN_MODE=$1; shift ;;
@@ -274,7 +274,7 @@ elif [[ ! -d "$INPUT_DIR_ARG" ]]; then
 fi
 
 # 3b. GTDB-Tk 데이터베이스 경로 확인
-if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "metawrap" || "$RUN_MODE" == "post-process" ]]; then
+if [[ "$SKIP_GTDBTK" == "false" && ( "$RUN_MODE" == "all" || "$RUN_MODE" == "metawrap" || "$RUN_MODE" == "post-process" ) ]]; then
     if [[ -z "$GTDBTK_DB_DIR_ARG" ]]; then
         error_messages+=("  - --gtdbtk_db_dir: GTDB-Tk를 사용하는 모드('${RUN_MODE}')에는 필수입니다.")
     elif [[ ! -d "$GTDBTK_DB_DIR_ARG" ]]; then
@@ -524,7 +524,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         THREADS="$THREADS_PER_JOB"
         MEMORY_GB="$MEMORY_GB_PER_JOB"
 
-#    if [[ ! -f "$R1_QC_GZ" ]]; then continue; fi
+    # if [[ ! -f "$R1_QC_GZ" ]]; then continue; fi
     # --- 샘플 정보 설정 ---
     # SAMPLE_BASE=$(basename "$R1_QC_GZ")
     # SAMPLE=""; R2_QC_GZ=""
@@ -542,7 +542,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     #    continue; 
     # fi   
     # --- 샘플 정보 설정 (유연한 패턴 매칭 적용) ---
-    if [[ ! -f "$R1_QC_GZ" ]]; then continue; fi
+    if [[ ! -f "$R1_QC_GZ" ]]; then exit 0; fi
 
     SAMPLE_BASE=$(basename "$R1_QC_GZ")
              
@@ -559,8 +559,6 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
         log_warn "Paired QC file for $SAMPLE not found. Expected: $(basename "$R2_QC_GZ")"
         continue
     fi
-
-    if [[ ! -f "$R2_QC_GZ" ]]; then log_warn "Paired QC file for $SAMPLE not found."; continue; fi
 
     # printf "\n" >&2; log_info "--- Processing sample '$SAMPLE' ---"
     CURRENT_PROGRESS=$((CURRENT_PROGRESS + 1))
@@ -675,7 +673,12 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                 set_job_status "$SAMPLE" "Running Assembly (MEGAHIT)..."
                     run_megahit "$SAMPLE" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "$ASSEMBLY_OUT_DIR_SAMPLE" "$MEGAHIT_PRESET_TO_USE" "$MEMORY_GB" "$MIN_CONTIG_LEN" "$THREADS" "$MEGAHIT_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
                 
-                if [ $? -eq 0 ]; then touch "$ASSEMBLY_SUCCESS_FLAG"; else log_warn "Assembly for ${SAMPLE} failed."; exit 1; fi
+                if [ $? -eq 0 ]; then 
+                    touch "$ASSEMBLY_SUCCESS_FLAG" 
+                else 
+                    log_warn "Assembly for ${SAMPLE} failed."
+                    exit 0
+                fi
             fi
             
             # Assembly 성공 여부와 관계없이 후속 분석 실행 (내부에서 파일 존재 여부 확인)
@@ -738,9 +741,8 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                         touch "$BINNING_SUCCESS_FLAG"; 
                     else 
                         log_warn "Binning finished but no MAGs found for ${SAMPLE}. (Not an error, just low quality)"
+                    fi
                 fi
-            fi
-        fi
 
                 # 5. GTDB-Tk 단계
                 # .success 플래그와 실제 결과 파일(summary.tsv) 존재 여부를 함께 확인
@@ -777,12 +779,13 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                 else
                     if [ -f "$BAKTA_MAGS_SUCCESS_FLAG" ]; then 
                         echo "[INFO] Bakta on MAGs done for ${SAMPLE}" >> "$LOG_FILE"
-                    elif [ -f "$GTDBTK_SUCCESS_FLAG" ]; then
-                            if [ -f "$GTDBTK_SUCCESS_FLAG" ] || [[ "$SKIP_GTDBTK" == "true" ]]; then
+                    elif [[ "$SKIP_GTDBTK" == "true" || -f "$GTDBTK_SUCCESS_FLAG" ]]; then
+                        if [ -f "$BINNING_SUCCESS_FLAG" ]; then
                             set_job_status "$SAMPLE" "Running Bakta on MAGs..."
                             run_bakta_for_mags "$SAMPLE" "$FINAL_BINS_DIR" "${BAKTA_ON_MAGS_DIR}/${SAMPLE}" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
                             touch "$BAKTA_MAGS_SUCCESS_FLAG"
                         fi
+                    else
                         log_warn "Skipping Bakta because GTDB-Tk classification failed (No Success Flag)."
                     fi
                 fi
