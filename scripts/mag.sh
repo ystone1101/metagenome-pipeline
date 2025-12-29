@@ -548,8 +548,9 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     R2_QC_GZ="${QC_READS_DIR}/${R2_BASE}"
         
     # 2. kneaddata, fastp 등 불필요한 꼬리표 제거 (깔끔한 이름 생성)
-    SAMPLE=$(echo "$SAMPLE_BASE" | sed -E 's/(_1|_2|_R1|_R2)?(_kneaddata|_paired|_unpaired|_fastp)?\.fastq\.gz//g')
-
+    # SAMPLE=$(echo "$SAMPLE_BASE" | sed -E 's/(_1|_2|_R1|_R2)?(_kneaddata|_paired|_unpaired|_fastp)?\.fastq\.gz//g')
+    SAMPLE=$(echo "$SAMPLE_BASE" | sed -E 's/(_1|_2|_R1|_R2|_kneaddata|_paired|_unpaired|_fastp).*//')
+    
     # 3. R2 파일 존재 여부 확인
     if [[ ! -f "$R2_QC_GZ" ]]; then 
         log_warn "Paired QC file for $SAMPLE not found. Expected: $(basename "$R2_QC_GZ")"
