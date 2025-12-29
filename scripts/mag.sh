@@ -546,10 +546,9 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     # 2. R2 파일 경로 추론 (샘플명 + _2.fastq.gz)
     R2_BASE="${SAMPLE_BASE/_1.fastq.gz/_2.fastq.gz}"
     R2_QC_GZ="${QC_READS_DIR}/${R2_BASE}"
-    
-    TEMP_NAME="${SAMPLE_BASE%_1.fastq.gz}"
+        
     # 2. kneaddata, fastp 등 불필요한 꼬리표 제거 (깔끔한 이름 생성)
-    SAMPLE=$(echo "$TEMP_NAME" | sed 's/_1_kneaddata_paired//' | sed 's/_kneaddata_paired//' | sed 's/_1_fastp//')
+    SAMPLE=$(echo "$SAMPLE_BASE" | sed -E 's/(_1|_2|_R1|_R2)?(_kneaddata|_paired|_unpaired|_fastp)?\.fastq\.gz//g')
 
     # 3. R2 파일 존재 여부 확인
     if [[ ! -f "$R2_QC_GZ" ]]; then 
