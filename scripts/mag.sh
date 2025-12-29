@@ -585,7 +585,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     REPAIR_DIR_SAMPLE="${REPAIR_DIR}/${SAMPLE}"
     
     echo ">>> [FINAL PATH CHECK] Output Dir: $ASSEMBLY_OUT_DIR_SAMPLE"
-    
+
     set_job_status "$SAMPLE" "Initializing MAG Analysis..."
 
     # --- 모드별 실행 로직 ---
@@ -636,7 +636,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
             (
                 flock 9    
                 set_job_status "$SAMPLE" "Running GTDB-Tk..."
-                run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS"
+                run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS" "$GTDBTK_DATA_PATH"
             ) 9>"$HEAVY_JOB_LOCK"
 
             BAKTA_MAGS_OUT_DIR_SAMPLE="${BAKTA_ON_MAGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_MAGS_OUT_DIR_SAMPLE"
@@ -753,7 +753,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                         (
                             flock 9
                             set_job_status "$SAMPLE" "Running GTDB-Tk..."
-                            run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                            run_gtdbtk "$SAMPLE" "$FINAL_BINS_DIR" "$GTDBTK_OUT_DIR_SAMPLE" "$GTDBTK_EXTRA_OPTS" "$GTDBTK_DATA_PATH" >> "$LOG_FILE" 2>&1
                         ) 9>"$HEAVY_JOB_LOCK"
 
                         if [[ -s "$GTDBTK_SUMMARY_FILE_BAC" || -s "$GTDBTK_SUMMARY_FILE_AR" ]]; then 

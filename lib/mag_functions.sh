@@ -426,7 +426,7 @@ run_metawrap_sample() {
 
 #--- GTDB-Tk Classification Function ---
 run_gtdbtk() {
-    local sample_name=$1; local final_bins_dir=$2; local gtdbtk_out_dir=$3; local extra_opts="${4:-}"
+    local sample_name=$1; local final_bins_dir=$2; local gtdbtk_out_dir=$3; local extra_opts="${4:-}"; local db_path="${5:-$GTDBTK_DATA_PATH}"
     
     mkdir -p "$gtdbtk_out_dir"
     
@@ -462,7 +462,7 @@ run_gtdbtk() {
         conda activate "$GTDBTK_ENV"
         
         # 환경변수 설정 (활성화된 쉘 내부에서)
-        export GTDBTK_DATA_PATH="${GTDBTK_DATA_PATH}"
+        export GTDBTK_DATA_PATH="$db_path"
         
         # GTDB-Tk 실행
         if gtdbtk classify_wf \
