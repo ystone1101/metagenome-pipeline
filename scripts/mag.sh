@@ -584,6 +584,8 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
     FINAL_BINS_DIR="${METAWRAP_DIR}/${SAMPLE}/bin_refinement/metawrap_${MIN_COMPLETENESS}_${MAX_CONTAMINATION}_bins"
     REPAIR_DIR_SAMPLE="${REPAIR_DIR}/${SAMPLE}"
     
+    echo ">>> [FINAL PATH CHECK] Output Dir: $ASSEMBLY_OUT_DIR_SAMPLE"
+    
     set_job_status "$SAMPLE" "Initializing MAG Analysis..."
 
     # --- 모드별 실행 로직 ---
