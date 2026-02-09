@@ -459,8 +459,8 @@ while true; do
             for s in "${TARGETS[@]}"; do
                 # find "${P1_CLEAN_READS_DIR}" -name "${s}*_1.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_1.fastq.gz" \;
                 # find "${P1_CLEAN_READS_DIR}" -name "${s}*_2.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_2.fastq.gz" \;
-                find "${P1_CLEAN_READS_DIR}" -maxdepth 1 -name "${s}_1.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_1.fastq.gz" \; 
-                find "${P1_CLEAN_READS_DIR}" -maxdepth 1 -name "${s}_2.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_2.fastq.gz" \; 
+                find "${P1_CLEAN_READS_DIR}" -maxdepth 1 -name "${s}*_1.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_1.fastq.gz" \; 
+                find "${P1_CLEAN_READS_DIR}" -maxdepth 1 -name "${s}*_2.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_2.fastq.gz" \;
             done
 
             # 3. MAG 파이프라인 실행 (재시도 로직 포함)
