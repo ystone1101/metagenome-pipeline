@@ -254,43 +254,41 @@ while true; do
         STATUS_MAG_ANNO="IDLE"
     fi
 
-# ==========================================================================
+    # ==========================================================================
     # [최종 통합] EggNOG CSV 복구, PASS/주의 판별, 자연 정렬 로직
     # ==========================================================================
     E_SUMMARY_FILE="${BASE_DIR}/2_mag_analysis/eggnog_annotation_summary.csv"
-    
-    # 1. 파일이 없으면 헤더 생성
-    if [ ! -f "$E_SUMMARY_FILE" ]; then
-        echo "Sample_ID,Total_Genes,Annotated_Genes,Ratio(%),Status" > "$E_SUMMARY_FILE"
-    fi
+    E_BUILD_FILE="${E_SUMMARY_FILE}.tmp"
 
-    # 2. .annotations 파일을 찾아 누락된 샘플 보충 (80% 기준 PASS/주의 적용)
+    # 1. 파일이 없으면 헤더 생성
+    echo "Sample_ID,Total_Genes,Annotated_Genes,Ratio(%),Status" > "$E_BUILD_FILE"
+
+    # .annotations 파일을 찾아 현재 시점의 수치를 정확히 계산
     find "$MAG_BASE" -path "*/04_eggnog_on_contigs/*/*.emapper.annotations" 2>/dev/null | while read -r annot_file; do
         s_name=$(basename "$annot_file" .emapper.annotations)
+        prot_file="${annot_file%.emapper.annotations}.faa"
         
-        # CSV에 이미 이름이 있는지 확인 (있으면 건너뜀)
-        if ! grep -q "^${s_name}," "$E_SUMMARY_FILE" 2>/dev/null; then
-            prot_file="${annot_file%.emapper.annotations}.faa"
-            if [ -f "$prot_file" ]; then
-                t_g=$(grep -c "^>" "$prot_file")
-                a_g=$(grep -v "^#" "$annot_file" | wc -l)
-                if [ "$t_g" -gt 0 ]; then
-                    ratio=$(echo "scale=2; ($a_g * 100) / $t_g" | bc -l)
-                    # 80% 기준 판별 (bc 사용)
-                    is_ok=$(echo "$ratio >= 80.00" | bc -l)
-                    [ "$is_ok" -eq 1 ] && stat_msg="PASS" || stat_msg="WARNING"
-                    echo "${s_name},${t_g},${a_g},${ratio},${stat_msg}" >> "$E_SUMMARY_FILE"
-                fi
+        if [ -f "$prot_file" ]; then
+            # 전체 유전자 수 (FAA 파일 기준)
+            t_g=$(grep -c "^>" "$prot_file")
+            # 주석된 유전자 수 (#으로 시작하는 헤더 제외)
+            a_g=$(grep -v "^#" "$annot_file" | wc -l)
+            
+            if [ "$t_g" -gt 0 ]; then
+                ratio=$(echo "scale=2; ($a_g * 100) / $t_g" | bc -l)
+                is_ok=$(echo "$ratio >= 80.00" | bc -l)
+                [ "$is_ok" -eq 1 ] && stat_msg="PASS" || stat_msg="WARNING"
+                echo "${s_name},${t_g},${a_g},${ratio},${stat_msg}" >> "$E_BUILD_FILE"
             fi
         fi
     done
 
     # 3. 샘플명 자연 정렬 (Sample_1, Sample_2, Sample_10 순서 보장)
-    if [ -s "$E_SUMMARY_FILE" ]; then
-        header_line=$(head -n 1 "$E_SUMMARY_FILE")
+    if [ -s "$E_BUILD_FILE" ]; then
+        header_line=$(head -n 1 "$E_BUILD_FILE")
         # 헤더 빼고 1열 기준 정렬(-V) 후 합치기
-        (echo "$header_line"; tail -n +2 "$E_SUMMARY_FILE" | sort -t',' -k1,1 -V) > "${E_SUMMARY_FILE}.tmp"
-        mv "${E_SUMMARY_FILE}.tmp" "$E_SUMMARY_FILE"
+        (echo "$header_line"; tail -n +2 "$E_BUILD_FILE" | sort -t',' -k1,1 -V) > "$E_SUMMARY_FILE"
+        rm "$E_BUILD_FILE"
     fi
 
     # 4. 웹 모니터링 폴더로 복사 (이걸 해야 웹에서 'No data'가 안 뜹니다)
@@ -589,20 +587,36 @@ while true; do
                     <div class="card-body p-2 d-flex flex-column mt-5 pb-0">
                         <div class="tab-content flex-grow-1">
                             <div class="tab-pane fade show active" id="p-qc">
-                                <div class="plot-container" style="justify-content: center; gap: 0px;">
-                                    <img src="qc_plot.png?v=$TIMESTAMP" class="plot-img" style="max-height: 85%; width: auto;">
-                                    <div class="px-3 py-3 border border-secondary rounded bg-black text-white small opacity-90" style="width: 95%; max-width: 700px; margin-bottom: 20px; margin-top: -60px; position: relative; z-index: 10;">
-                                        <div class="row g-2 text-start">
-                                            <div class="col-6"><span class="text-neon fw-bold">Pass</span>: 정상 (QC 통과)</div>
-                                            <div class="col-6"><span class="text-warning fw-bold">Low Paired</span>: Read 페어링 비율 80% 미만</div>
-                                            <div class="col-6"><span class="text-warning fw-bold">High Host</span>: 호스트 Read 제거율 30% 초과 </div>
-                                            <div class="col-6"><span class="text-danger fw-bold">Small File</span>: 데이터 파일 크기 5 GB 미달 </div>
+                                <div class="plot-container" style="justify-content: center; gap: -5px;">
+                                    <img src="qc_plot.png?v=$TIMESTAMP" class="plot-img" style="max-height: 85%; width: auto; margin-top: -5px; margin-bottom: 0px;">
+                                    <div class="px-4 py-3 border border-secondary rounded bg-black text-white small opacity-90" style="width: 95%; max-width: 700px; margin-bottom: 30px; margin-top: -90px; position: relative; z-index: 10;">
+                                        <div class="row g-3 text-start">
+                                            <div class="col-12 d-flex align-items-center pb-2 mb-1">
+                                                <span style="color: #00e676; font-size: 1.2rem; margin-right: 10px;">●</span>
+                                                <span class="text-neon fw-bold" style="width: 100px;">Pass</span>
+                                                <span style="color: #aaaaaa;">: 모든 QC 지표가 정상 범위에 있는 샘플 (분석 적합)</span>
+                                            </div>
+                                            <div class="col-12 d-flex align-items-center pb-2 mb-1">
+                                                <span style="color: #ff9100; font-size: 1.2rem; margin-right: 10px;">●</span>
+                                                <span class="text-warning fw-bold" style="width: 100px;">Low Paired</span>
+                                                <span style="color: #aaaaaa;">: R1/R2 페어링 생존율 80% 미만 (품질 저하 의심)</span>
+                                            </div>
+                                            <div class="col-12 d-flex align-items-center pb-2 mb-1">
+                                                <span style="color: #ff9100; font-size: 1.2rem; margin-right: 10px;">●</span>
+                                                <span class="text-warning fw-bold" style="width: 100px;">High Host</span>
+                                                <span style="color: #aaaaaa;">: Host Read 제거율 30% 초과 (미생물 비중 낮음)</span>
+                                            </div>
+                                            <div class="col-12 d-flex align-items-center">
+                                                <span style="color: #ff1744; font-size: 1.2rem; margin-right: 10px;">●</span>
+                                                <span class="text-danger fw-bold" style="width: 100px;">Small File</span>
+                                                <span style="color: #aaaaaa;">: 최종 결과 파일 크기 5 GB 미달 (데이터량 미확보)</span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="tab-pane fade h-100" id="p-box"><div class="plot-container"><img src="kraken_box.png?v=$TIMESTAMP" class="plot-img"></div></div>
-                            <div class="tab-pane fade h-100" id="p-n50"><div class="plot-container"><img src="assembly_n50.png?v=$TIMESTAMP" class="plot-img"></div></div>
+                            <div class="tab-pane fade" id="p-box"><div class="plot-container" style="justify-content: center !important; height: 100%; margin-top: 50px;"><img src="kraken_box.png?v=$TIMESTAMP" class="plot-img"></div></div>
+                            <div class="tab-pane fade" id="p-n50"><div class="plot-container" style="justify-content: center !important; height: 100%; margin-top: 50px;"><img src="assembly_n50.png?v=$TIMESTAMP" class="plot-img"></div></div>
                         </div>
                     </div>
                 </div>
