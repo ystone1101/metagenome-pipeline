@@ -9,7 +9,7 @@ WEB_DIR="${BASE_DIR}/web_monitor/Dokkaebi_Pipeline/Monitor_V2"
 
 QC_SCRIPT="/home/dnalink/Desktop/GDM/metagenome-pipeline/lib/generate_qc_report.py"
 LOG_DIR="${BASE_DIR}/1_microbiome_taxonomy/logs/kneaddata_logs/"
-QC_OUTPUT_CSV="${BASE_DIR}/1_microbiome_taxonomy/qc_summary.csv"
+QC_OUTPUT_CSV="${BASE_DIR}/1_microbiome_taxonomy/KneadData_QC_Summary.csv"
 KRAKEN_SUMMARY="${BASE_DIR}/1_microbiome_taxonomy/kraken2_summary.tsv"
 
 PLOT_SCRIPT="${WEB_DIR}/generate_plots.py"
