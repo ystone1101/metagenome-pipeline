@@ -83,7 +83,10 @@ try:
             ax.set_xticklabels(['Classified', 'Unclassified'], fontsize=12, fontweight='bold')
             ax.set_ylabel('Percentage (%)', fontsize=12, fontweight='bold')
             ax.set_title('Taxonomy Ratio', fontsize=14, fontweight='bold', pad=15)
-            ax.set_ylim(-5, 105)
+            if not df_k2.empty:
+                ax.set_ylim(-5, 105)
+            else:
+                ax.set_ylim(0, 100)
             ax.grid(axis='y', linestyle='--', alpha=0.5)
             plt.savefig(os.path.join(output_dir, 'kraken_box.png'), dpi=150, bbox_inches='tight')
             plt.close()
@@ -148,7 +151,7 @@ try:
                 ax.set_ylabel('Contig Length (bp)', fontweight='bold')
                 ax.set_title('Assembly Nx Curve', fontweight='bold', fontsize=14)
                 ax.set_xlim(0, 100)
-                ax.set_yscale('log')
+                ax.set_yscale('log') if any(y > 0 for y in y_pts) else ax.set_yscale('linear')
                 ax.grid(True, which="both", ls="--", alpha=0.3)
                 # 범례 추가 (너무 많으면 지저분하므로 10개 이하일 때만 표시)
                 if num_files <= 10: ax.legend([os.path.basename(f).split('_')[0] for f in files], fontsize='small', loc='upper right')
