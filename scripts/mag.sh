@@ -710,7 +710,7 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
                             flock 9
                             set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
                             KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
-                            run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                            run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_CONTIGS_SUMMARY_TSV" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
                         ) 9>"$HEAVY_JOB_LOCK"
                             
                         # 2. Annotation (Functional) - 선택적 실행
