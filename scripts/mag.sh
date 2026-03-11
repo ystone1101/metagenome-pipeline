@@ -696,33 +696,55 @@ for R1_QC_GZ in "${QC_READS_DIR}"/*_1.fastq.gz; do
             if [ -f "$POST_ASSEMBLY_SUCCESS_FLAG" ]; then 
                 echo "[INFO] Post-Assembly done for ${SAMPLE}" >> "$LOG_FILE" 
             else
+                STATS_SUCCESS_FLAG="${ASSEMBLY_STATS_DIR}/.${SAMPLE}.stats.success"
+                KRAKEN_CONTIGS_FLAG="${KRAKEN_ON_CONTIGS_DIR}/.${SAMPLE}.kraken.success"
+                if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
+                    ANNO_CONTIGS_FLAG="${BAKTA_ON_CONTIGS_DIR}/.${SAMPLE}.anno.success"
+                else
+                    ANNO_CONTIGS_FLAG="${EGGNOG_ON_CONTIGS_DIR}/.${SAMPLE}.anno.success"
+                fi
 
                 if [ -f "$ASSEMBLY_SUCCESS_FLAG" ]; then
                     log_info "Starting post-assembly analysis for ${SAMPLE}..."
-                    set_job_status "$SAMPLE" "Running Post-Assembly Stats..."
-                    STATS_OUT_FILE="${ASSEMBLY_STATS_DIR}/${SAMPLE}_assembly_stats.txt"
-                    conda run -n "$BBMAP_ENV" stats.sh in="$ASSEMBLY_FA" > "$STATS_OUT_FILE"
+
+                    # --- 1. Assembly Stats ---
+                    if [ ! -f "$STATS_SUCCESS_FLAG" ]; then                    
+                        set_job_status "$SAMPLE" "Running Post-Assembly Stats..."
+                        STATS_OUT_FILE="${ASSEMBLY_STATS_DIR}/${SAMPLE}_assembly_stats.txt"
+                        conda run -n "$BBMAP_ENV" stats.sh in="$ASSEMBLY_FA" > "$STATS_OUT_FILE"
+                        touch "$STATS_SUCCESS_FLAG"
+                    fi
 
                     if [ "$SKIP_CONTIG_ANALYSIS" = false ]; then
-                        # 1. Kraken2 (Taxonomy) - 항상 실행
-                        set_job_status "$SAMPLE" "Waiting for Kraken2 Slot..."
-                        (
-                            flock 9
-                            set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
-                            KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
-                            run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_CONTIGS_SUMMARY_TSV" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
-                        ) 9>"$HEAVY_JOB_LOCK"
+                        # --- 2. Kraken2 on Contigs ---
+                        if [ ! -f "$KRAKEN_CONTIGS_FLAG" ]; then
+                            set_job_status "$SAMPLE" "Waiting for Kraken2 Slot..."
+                            (
+                                flock 9
+                                set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
+                                KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
+                                run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_CONTIGS_SUMMARY_TSV" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                            ) 9>"$HEAVY_JOB_LOCK"
+                            touch "$KRAKEN_CONTIGS_FLAG"
+                        else
+                            echo "[INFO] Kraken2 on contigs done for ${SAMPLE}" >> "$LOG_FILE"
+                        fi
                             
-                        # 2. Annotation (Functional) - 선택적 실행
+                        # --- 3. Annotation (Functional) ---
                         if [ "$SKIP_ANNOTATION" = false ]; then
-                            if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
-                                set_job_status "$SAMPLE" "Running Bakta on Contigs..."
-                                BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
-                                run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
-                            elif [[ "$ANNOTATION_TOOL" == "eggnog" ]]; then
-                                set_job_status "$SAMPLE" "Running EggNOG on Contigs..."
-                                EGGNOG_CONTIGS_OUT_DIR_SAMPLE="${EGGNOG_ON_CONTIGS_DIR}/${SAMPLE}"
-                                run_eggnog_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$EGGNOG_CONTIGS_OUT_DIR_SAMPLE" "$EGGNOG_DB_DIR_ARG" "$EGGNOG_EXTRA_OPTS" "$EGGNOG_SUMMARY_CSV" >> "$LOG_FILE" 2>&1
+                            if [ ! -f "$ANNO_CONTIGS_FLAG" ]; then
+                                if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
+                                    set_job_status "$SAMPLE" "Running Bakta on Contigs..."
+                                    BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
+                                    run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                                elif [[ "$ANNOTATION_TOOL" == "eggnog" ]]; then
+                                    set_job_status "$SAMPLE" "Running EggNOG on Contigs..."
+                                    EGGNOG_CONTIGS_OUT_DIR_SAMPLE="${EGGNOG_ON_CONTIGS_DIR}/${SAMPLE}"
+                                    run_eggnog_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$EGGNOG_CONTIGS_OUT_DIR_SAMPLE" "$EGGNOG_DB_DIR_ARG" "$EGGNOG_EXTRA_OPTS" "$EGGNOG_SUMMARY_CSV" >> "$LOG_FILE" 2>&1
+                                fi
+                                touch "$ANNO_CONTIGS_FLAG"
+                            else
+                                echo "[INFO] Contig Annotation done for ${SAMPLE}" >> "$LOG_FILE"
                             fi
                         else
                             echo "[INFO] Skipping Contig Annotation (--skip-annotation enabled)." >> "$LOG_FILE"
