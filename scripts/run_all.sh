@@ -414,110 +414,162 @@ while true; do
     log_info "Inputs for Pipeline 2 verified. Proceeding to MAG..."
 
     # -------------------------------------------------------
-    # [2단계] MAG 분석 실행 (Batch Processing Mode)
+    # [2단계 개조] MAG 분석 실행 및 낙오자 정밀 타격 모드 (Smart Recovery Mode)
     # -------------------------------------------------------
-    log_info "--- [Phase 2] Checking for pending MAG jobs ---"
+    log_info "--- [Phase 2] Checking for pending/failed MAG jobs ---"
     
-    # 1. 미완료 샘플 싹 긁어모으기
-    PENDING_SAMPLES=()
+    # 1. 미완료 샘플 싹 긁어모으기 및 단계별 정밀 진단 (AS 분류)
+    PENDING_ALL=()       # 아예 처음(all)부터 돌려야 하는 완전히 새로운 샘플
+    PENDING_BINNING=()   # Assembly는 끝났으나 Binning 단계에서 낙오된 샘플
+    PENDING_ANNOT=()     # Binning까지 끝났으나 Annotation 단계에서 낙오된 샘플
+
     for clean_r1 in "${P1_CLEAN_READS_DIR}"/*_1.fastq.gz; do
         [ -e "$clean_r1" ] || continue
-        # 샘플명 추출 (사용자 환경에 맞춘 패턴)
         s_name=$(basename "$clean_r1" | sed 's/_1_kneaddata_paired_1.fastq.gz//' | sed 's/_1.fastq.gz//')
         
-        # Annotation 결과 폴더가 없으면 '할 일'로 추가
-        if [ ! -d "${P2_OUTPUT_DIR}/05_annotation/${s_name}" ]; then
-            PENDING_SAMPLES+=("$s_name")
+        # 단계별 완료 여부를 증명하는 플래그 경로 설정
+        FLAG_ASS="${P2_OUTPUT_DIR}/01_assembly/${s_name}/done"
+        FLAG_BIN="${P2_OUTPUT_DIR}/05_metawrap/.${s_name}.binning.success"
+        FLAG_ANT="${P2_OUTPUT_DIR}/05_annotation/${s_name}"  # 최종 목표 폴더
+
+        # 최종 완료 폴더가 없을 경우에만 정밀 낙오 진단 실시
+        if [ ! -d "$FLAG_ANT" ]; then
+            if [ ! -f "$FLAG_ASS" ]; then
+                PENDING_ALL+=("$s_name")      # Assembly 조차 없음 -> 처음부터 실행
+            elif [ ! -f "$FLAG_BIN" ]; then
+                PENDING_BINNING+=("$s_name")  # Assembly는 있으나 Binning 낙오
+            else
+                PENDING_ANNOT+=("$s_name")    # Binning은 있으나 Annotation 낙오
+            fi
         fi
     done
 
-    # 2. 작업이 있다면? -> 다 털어낼 때까지 여기서 못 나갑니다! (집중 처리)
-    if [ ${#PENDING_SAMPLES[@]} -gt 0 ]; then
+    TOTAL_PENDING=$(( ${#PENDING_ALL[@]} + ${#PENDING_BINNING[@]} + ${#PENDING_ANNOT[@]} ))
+
+    # 2. 작업 대기열 가동 (기존 배치 프레임워크 100% 재사용)
+    if [ "$TOTAL_PENDING" -gt 0 ]; then
         
         REAL_BATCH_SIZE=${PARALLEL_JOBS:-1}
-        TOTAL_PENDING=${#PENDING_SAMPLES[@]}
         
-        log_info "🚀 Detected ${TOTAL_PENDING} pending samples. Switching to BATCH MODE."
-        log_info "   (Will process ALL pending samples before checking raw data again)"
+        log_info "🚀 Detected ${TOTAL_PENDING} pending/failed jobs. Switching to SMART BATCH MODE."
+        log_info "   - New / Assembly Failed (Mode 'all'): ${#PENDING_ALL[@]} samples"
+        log_info "   - Assembly OK, Binning Failed (Mode 'binning'): ${#PENDING_BINNING[@]} samples"
+        log_info "   - Binning OK, Annotation Failed (Mode 'annotation'): ${#PENDING_ANNOT[@]} samples"
 
-        # [핵심 변경] 전체 대기열을 배치 크기만큼 잘라서 반복문 실행
-        for ((i=0; i<TOTAL_PENDING; i+=REAL_BATCH_SIZE)); do
-            
-            # 배열 자르기 (Slicing): i번째부터 BATCH_SIZE만큼 가져옴
-            TARGETS=("${PENDING_SAMPLES[@]:i:REAL_BATCH_SIZE}")
-            
-            CURRENT_BATCH_NUM=$((i/REAL_BATCH_SIZE + 1))
-            TOTAL_BATCH_NUM=$(( (TOTAL_PENDING + REAL_BATCH_SIZE - 1) / REAL_BATCH_SIZE ))
+        # ------------------------------------------------------------------
+        # [공정 1] 새 샘플 혹은 조립 실패 그룹 처리
+        # ------------------------------------------------------------------
+        if [ ${#PENDING_ALL[@]} -gt 0 ]; then
+            for ((i=0; i<${#PENDING_ALL[@]}; i+=REAL_BATCH_SIZE)); do
+                TARGETS=("${PENDING_ALL[@]:i:REAL_BATCH_SIZE}")
+                log_info ">>> [Batch-ALL] Processing: ${TARGETS[*]}"
 
-            log_info ">>> [Batch ${CURRENT_BATCH_NUM}/${TOTAL_BATCH_NUM}] Processing: ${TARGETS[*]}"
+                TEMP_MAG_INPUT="/tmp/dokkaebi_mag_run_$$"
+                rm -rf "$TEMP_MAG_INPUT" && mkdir -p "$TEMP_MAG_INPUT"
 
-            # 임시 폴더 생성 (Batch마다 새로 만듦)
-            TEMP_MAG_INPUT="/tmp/dokkaebi_mag_run_$$"
-            rm -rf "$TEMP_MAG_INPUT" && mkdir -p "$TEMP_MAG_INPUT"
+                for s in "${TARGETS[@]}"; do
+                    find "$P1_CLEAN_READS_DIR" -maxdepth 1 -name "${s}*_1.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_1.fastq.gz" \;
+                    find "$P1_CLEAN_READS_DIR" -maxdepth 1 -name "${s}*_2.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_2.fastq.gz" \;
+                done
 
-            # 타겟 파일만 임시 폴더로 링크
-            for s in "${TARGETS[@]}"; do
-                # find "${P1_CLEAN_READS_DIR}" -name "${s}*_1.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_1.fastq.gz" \;
-                # find "${P1_CLEAN_READS_DIR}" -name "${s}*_2.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_2.fastq.gz" \;
-                find "${P1_CLEAN_READS_DIR}" -maxdepth 1 -name "${s}*_1.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_1.fastq.gz" \; 
-                find "${P1_CLEAN_READS_DIR}" -maxdepth 1 -name "${s}*_2.fastq.gz" -exec ln -s {} "${TEMP_MAG_INPUT}/${s}_2.fastq.gz" \;
-            done
+                MAG_RETRY_COUNT=0
+                while [ "$MAG_RETRY_COUNT" -le "$MAX_RETRIES" ]; do
+                    P2_CMD_ARRAY=( bash "${PROJECT_ROOT_DIR}/scripts/mag.sh" all --input_dir "${TEMP_MAG_INPUT}" --output_dir "${P2_OUTPUT_DIR}" --raw_input_dir "${INPUT_DIR}" --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}" --eggnog_db_dir "${EGGNOG_DB}" --threads "${THREADS}" --memory_gb "${MEMORY_GB}" --parallel-jobs "${REAL_BATCH_SIZE}" --annotation-tool "${ANNOTATION_TOOL:-eggnog}" "${MAG_EXTRA_OPTS[@]}" )
+                    if [ "$SKIP_CONTIG_ANALYSIS" = true ]; then P2_CMD_ARRAY+=(--skip-contig-analysis); fi
+                    if [ "$SKIP_ANNOTATION" = true ]; then P2_CMD_ARRAY+=(--skip-annotation); fi
+                    [[ -n "$MEGAHIT_OPTS" ]] && P2_CMD_ARRAY+=(--megahit-opts "$MEGAHIT_OPTS")
+                    [[ -n "$KRAKEN2_OPTS" ]] && P2_CMD_ARRAY+=(--kraken2-opts "$KRAKEN2_OPTS")
+                    [[ -n "$METAWRAP_BINNING_OPTS" ]] && P2_CMD_ARRAY+=(--metawrap-binning-opts "$METAWRAP_BINNING_OPTS")
+                    [[ -n "$METAWRAP_REFINEMENT_OPTS" ]] && P2_CMD_ARRAY+=(--metawrap-refinement-opts "$METAWRAP_REFINEMENT_OPTS")
+                    [[ -n "$GTDBTK_OPTS" ]] && P2_CMD_ARRAY+=(--gtdbtk-opts "$GTDBTK_OPTS")
+                    [[ -n "$BAKTA_OPTS" ]] && P2_CMD_ARRAY+=(--bakta-opts "$BAKTA_OPTS")
+                    [[ -n "$EGGNOG_OPTS" ]] && P2_CMD_ARRAY+=(--eggnog-opts "$EGGNOG_OPTS")
 
-            # 3. MAG 파이프라인 실행 (재시도 로직 포함)
-            MAG_RETRY_COUNT=0
-            while [ "$MAG_RETRY_COUNT" -le "$MAX_RETRIES" ]; do
-                
-                P2_CMD_ARRAY=(
-                    bash "${PROJECT_ROOT_DIR}/scripts/mag.sh" all 
-                    --input_dir "${TEMP_MAG_INPUT}" 
-                    --output_dir "${P2_OUTPUT_DIR}"
-                    --raw_input_dir "${INPUT_DIR}"
-                    --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}" --eggnog_db_dir "${EGGNOG_DB}"
-                    --threads "${THREADS}" --memory_gb "${MEMORY_GB}"
-                    --parallel-jobs "${REAL_BATCH_SIZE}"
-                    --annotation-tool "${ANNOTATION_TOOL:-eggnog}"
-                    "${MAG_EXTRA_OPTS[@]}"
-                )
-
-                # 옵션 추가
-                if [ "$SKIP_CONTIG_ANALYSIS" = true ]; then P2_CMD_ARRAY+=(--skip-contig-analysis); fi
-                if [ "$SKIP_ANNOTATION" = true ]; then P2_CMD_ARRAY+=(--skip-annotation); fi
-                [[ -n "$MEGAHIT_OPTS" ]] && P2_CMD_ARRAY+=(--megahit-opts "$MEGAHIT_OPTS")
-                [[ -n "$KRAKEN2_OPTS" ]] && P2_CMD_ARRAY+=(--kraken2-opts "$KRAKEN2_OPTS")
-                [[ -n "$METAWRAP_BINNING_OPTS" ]] && P2_CMD_ARRAY+=(--metawrap-binning-opts "$METAWRAP_BINNING_OPTS")
-                [[ -n "$METAWRAP_REFINEMENT_OPTS" ]] && P2_CMD_ARRAY+=(--metawrap-refinement-opts "$METAWRAP_REFINEMENT_OPTS")
-                [[ -n "$GTDBTK_OPTS" ]] && P2_CMD_ARRAY+=(--gtdbtk-opts "$GTDBTK_OPTS")
-                [[ -n "$BAKTA_OPTS" ]] && P2_CMD_ARRAY+=(--bakta-opts "$BAKTA_OPTS")
-                [[ -n "$EGGNOG_OPTS" ]] && P2_CMD_ARRAY+=(--eggnog-opts "$EGGNOG_OPTS")
-
-                if "${P2_CMD_ARRAY[@]}"; then
-                    MAG_RETRY_COUNT=0
-                    break 
-                else
-                    MAG_RETURN_CODE=$?
-                    if [ "$MAG_RETURN_CODE" -eq 99 ]; then 
-                        log_warn "MAG run interrupted (Signal 99)."
-                        break 2 # 전체 배치 루프 탈출
+                    if "${P2_CMD_ARRAY[@]}"; then 
+                        MAG_RETRY_COUNT=0
+                        break
+                    else
+                        MAG_RETURN_CODE=$?
+                        if [ "$MAG_RETURN_CODE" -eq 99 ]; then log_warn "MAG run interrupted."; break 2; fi
+                        MAG_RETRY_COUNT=$((MAG_RETRY_COUNT + 1))
+                        log_error "MAG Batch Failed ($MAG_RETRY_COUNT/$MAX_RETRIES). Retrying..."; sleep 60
                     fi
-                    MAG_RETRY_COUNT=$((MAG_RETRY_COUNT + 1))
-                    log_error "MAG Batch Failed ($MAG_RETRY_COUNT/$MAX_RETRIES). Retrying..."
-                    sleep 60
-                fi
+                done
+                rm -rf "$TEMP_MAG_INPUT"
+                if [ -f "${INPUT_DIR}/stop_pipeline" ]; then log_warn "Stop signal detected."; break; fi
             done
-            
-            # 임시 폴더 청소
-            rm -rf "$TEMP_MAG_INPUT"
-            
-            # 중간에 멈춤 신호 확인 (안전장치)
-            if [ -f "${INPUT_DIR}/stop_pipeline" ]; then
-                log_warn "Stop signal detected. Halting batch processing."
-                break
-            fi
+        fi
 
-        done # 배치 루프 종료
-        
-        log_info "✅ All pending batches completed."
+        # ------------------------------------------------------------------
+        # [공정 2] Binning 단계에서 멈춘 그룹 복구 (mag.sh binning)
+        # ------------------------------------------------------------------
+        if [ ${#PENDING_BINNING[@]} -gt 0 ]; then
+            for ((i=0; i<${#PENDING_BINNING[@]}; i+=REAL_BATCH_SIZE)); do
+                TARGETS=("${PENDING_BINNING[@]:i:REAL_BATCH_SIZE}")
+                log_info ">>> [Batch-BINNING Recovery] Processing: ${TARGETS[*]}"
 
+                for s in "${TARGETS[@]}"; do
+                    [ -d "${P2_OUTPUT_DIR}/05_metawrap/$s" ] && rm -rf "${P2_OUTPUT_DIR}/05_metawrap/$s"
+                done
+
+                # 배열 인자 외부에서 쉼표 변환 수행하여 꼬임 방지
+                S_LIST=$(echo "${TARGETS[*]}" | tr ' ' ',')
+
+                MAG_RETRY_COUNT=0
+                while [ "$MAG_RETRY_COUNT" -le "$MAX_RETRIES" ]; do
+                    P2_CMD_ARRAY=( bash "${PROJECT_ROOT_DIR}/scripts/mag.sh" binning --output_dir "${P2_OUTPUT_DIR}" --raw_input_dir "${INPUT_DIR}" --kraken2_db "${KRAKEN2_DB}" --threads "${THREADS}" --parallel-jobs "${REAL_BATCH_SIZE}" --samples "${S_LIST}" )
+                    [[ -n "$METAWRAP_BINNING_OPTS" ]] && P2_CMD_ARRAY+=(--metawrap-binning-opts "$METAWRAP_BINNING_OPTS")
+                    [[ -n "$METAWRAP_REFINEMENT_OPTS" ]] && P2_CMD_ARRAY+=(--metawrap-refinement-opts "$METAWRAP_REFINEMENT_OPTS")
+
+                    if "${P2_CMD_ARRAY[@]}"; then 
+                        MAG_RETRY_COUNT=0
+                        break
+                    else
+                        MAG_RETURN_CODE=$?
+                        if [ "$MAG_RETURN_CODE" -eq 99 ]; then log_warn "MAG run interrupted."; break 2; fi
+                        MAG_RETRY_COUNT=$((MAG_RETRY_COUNT + 1))
+                        log_error "Binning Recovery Batch Failed ($MAG_RETRY_COUNT/$MAX_RETRIES). Retrying..."; sleep 60
+                    fi
+                done
+                if [ -f "${INPUT_DIR}/stop_pipeline" ]; then log_warn "Stop signal detected."; break; fi
+            done
+        fi
+
+        # ------------------------------------------------------------------
+        # [공정 3] Annotation 단계에서만 멈춘 그룹 복구 (mag.sh annotation)
+        # ------------------------------------------------------------------
+        if [ ${#PENDING_ANNOT[@]} -gt 0 ]; then
+            for ((i=0; i<${#PENDING_ANNOT[@]}; i+=REAL_BATCH_SIZE)); do
+                TARGETS=("${PENDING_ANNOT[@]:i:REAL_BATCH_SIZE}")
+                log_info ">>> [Batch-ANNOTATION Recovery] Processing: ${TARGETS[*]}"
+
+                # 쉼표 변환 수행
+                S_LIST=$(echo "${TARGETS[*]}" | tr ' ' ',')
+
+                MAG_RETRY_COUNT=0
+                while [ "$MAG_RETRY_COUNT" -le "$MAX_RETRIES" ]; do
+                    P2_CMD_ARRAY=( bash "${PROJECT_ROOT_DIR}/scripts/mag.sh" annotation --output_dir "${P2_OUTPUT_DIR}" --raw_input_dir "${INPUT_DIR}" --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}" --eggnog_db_dir "${EGGNOG_DB}" --threads "${THREADS}" --parallel-jobs "${REAL_BATCH_SIZE}" --annotation-tool "${ANNOTATION_TOOL:-eggnog}" "${MAG_EXTRA_OPTS[@]}" --samples "${S_LIST}" )
+                    if [ "$SKIP_CONTIG_ANALYSIS" = true ]; then P2_CMD_ARRAY+=(--skip-contig-analysis); fi
+                    if [ "$SKIP_ANNOTATION" = true ]; then P2_CMD_ARRAY+=(--skip-annotation); fi
+                    [[ -n "$GTDBTK_OPTS" ]] && P2_CMD_ARRAY+=(--gtdbtk-opts "$GTDBTK_OPTS")
+                    [[ -n "$BAKTA_OPTS" ]] && P2_CMD_ARRAY+=(--bakta-opts "$BAKTA_OPTS")
+                    [[ -n "$EGGNOG_OPTS" ]] && P2_CMD_ARRAY+=(--eggnog-opts "$EGGNOG_OPTS")
+
+                    if "${P2_CMD_ARRAY[@]}"; then 
+                        MAG_RETRY_COUNT=0
+                        break
+                    else
+                        MAG_RETURN_CODE=$?
+                        if [ "$MAG_RETURN_CODE" -eq 99 ]; then log_warn "MAG run interrupted."; break 2; fi
+                        MAG_RETRY_COUNT=$((MAG_RETRY_COUNT + 1))
+                        log_error "Annotation Recovery Batch Failed ($MAG_RETRY_COUNT/$MAX_RETRIES). Retrying..."; sleep 60
+                    fi
+                done
+                if [ -f "${INPUT_DIR}/stop_pipeline" ]; then log_warn "Stop signal detected."; break; fi
+            done
+        fi
+
+        log_info "✅ All pending/recovered batches completed."
     else
         log_info "No pending MAG jobs. Everything is up to date."
     fi
