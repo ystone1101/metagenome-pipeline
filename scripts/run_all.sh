@@ -435,14 +435,16 @@ while true; do
         # 최종 완료 폴더가 없을 경우에만 정밀 낙오 진단 실시
         if [ ! -d "$FLAG_ANT" ]; then
             if [ ! -f "$FLAG_ASS" ]; then
-                PENDING_ALL+=("$s_name")      # Assembly 조차 없음 -> 처음부터 실행
+                PENDING_ALL+=("$s_name")
             elif [ ! -f "$FLAG_BIN" ]; then
-                PENDING_BINNING+=("$s_name")  # Assembly는 있으나 Binning 낙오
+                PENDING_BINNING+=("$s_name")
             else
-                PENDING_ANNOT+=("$s_name")    # Binning은 있으나 Annotation 낙오
+                ANNOT_FILE="${P2_OUTPUT_DIR}/04_eggnog_on_contigs/${s_name}/${s_name}.emapper.annotations"
+                if [ ! -s "$ANNOT_FILE" ]; then
+                    PENDING_ANNOT+=("$s_name")
+                fi
             fi
         fi
-    done
 
     TOTAL_PENDING=$(( ${#PENDING_ALL[@]} + ${#PENDING_BINNING[@]} + ${#PENDING_ANNOT[@]} ))
 
