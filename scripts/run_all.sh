@@ -445,7 +445,8 @@ while true; do
                 fi
             fi
         fi
-
+    done
+    
     TOTAL_PENDING=$(( ${#PENDING_ALL[@]} + ${#PENDING_BINNING[@]} + ${#PENDING_ANNOT[@]} ))
 
     # 2. 작업 대기열 가동 (기존 배치 프레임워크 100% 재사용)
