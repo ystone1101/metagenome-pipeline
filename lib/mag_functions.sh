@@ -418,8 +418,8 @@ run_metawrap_sample() {
     log_info "${sample_name}: Running MetaWRAP bin_refinement module..."
     conda run -n "$METAWRAP_ENV" metawrap bin_refinement -o "${metawrap_sample_dir}/bin_refinement" -t "$THREADS" \
         -A "${initial_bins_dir}/metabat2_bins/" -B "${initial_bins_dir}/maxbin2_bins/" \
-        -C "${initial_bins_dir}/concoct_bins/" -c "$min_completeness" -x "$max_contamination" $refinement_extra_opts "$LOG_FILE" 2>&1
-        
+        -C "${initial_bins_dir}/concoct_bins/" -c "$min_completeness" -x "$max_contamination" $refinement_extra_opts >> "$LOG_FILE" 2>&1
+
     if [[ ! -d "$final_bins_dir" ]]; then
         log_warn "MetaWRAP bin_refinement failed for ${sample_name}."
         return 1
@@ -648,7 +648,7 @@ run_eggnog_on_contigs() {
 
 # --- [내부 함수] 주석 비율 계산기 (유지) ---
 check_annotation_ratio() {
-    local sample=$1; local prot_file=$2; local annot_file=$3, local csv_file="${4:-}"
+    local sample=$1; local prot_file=$2; local annot_file=$3; local csv_file="${4:-}"
     
     # 파일이 존재하는지 먼저 확인
     if [[ -f "$prot_file" && -f "$annot_file" ]]; then
