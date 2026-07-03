@@ -628,24 +628,6 @@ while true; do
     fi
 
     # =======================================================
-    # [수정: 자동 종료 확인] 작업이 다 끝났으면 루프 탈출
-    # =======================================================
-    ALL_SAMPLES=($(ls -d ${RAW_DATA_DIR}/*))
-    PENDING_COUNT=0
-    for s_path in "${ALL_SAMPLES[@]}"; do
-        s=$(basename "$s_path" | sed -E "s/_([0-9]+)$//")
-        ANNOT_FILE="${OUTPUT_DIR}/2_mag_analysis/04_eggnog_on_contigs/${s}/${s}.emapper.annotations"
-        if [ ! -s "$ANNOT_FILE" ]; then
-            PENDING_COUNT=$((PENDING_COUNT + 1))
-        fi
-    done
-
-    if [ "$PENDING_COUNT" -eq 0 ]; then
-        log_info "🎉 모든 작업 완수. 프로세스를 종료합니다."
-        break
-    fi
-
-    # =======================================================
     # [종료 신호 감지]
     # =======================================================
     if [ -f "${INPUT_DIR}/stop_pipeline" ]; then
