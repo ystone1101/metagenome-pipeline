@@ -216,8 +216,11 @@ done
 log_info "Starting Pipeline Loop..."
 
 # 상태 모니터링용 폴더 설정
-if [ -d "/dev/shm" ]; then STATUS_DIR="/dev/shm/dokkaebi_status"; else STATUS_DIR="/tmp/dokkaebi_status"; fi
+if [ -d "/dev/shm" ]; then STATUS_DIR="/dev/shm/dokkaebi_status"; else 
+STATUS_DIR="/tmp/dokkaebi_status"; fi
 rm -f "${STATUS_DIR}"/*.status
+
+find "${CLEAN_DIR}" -maxdepth 1 -name ".*.processing" -delete 2>/dev/null || true
 
 TOTAL_FILES=$(find "$RAW_DIR" -maxdepth 1 -name "*_1.fastq.gz" -o -name "*_R1.fastq.gz" | wc -l)
 CURRENT_COUNT=0
