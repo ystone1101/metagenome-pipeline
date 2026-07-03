@@ -588,8 +588,8 @@ for R1_QC_GZ in "${TARGET_SAMPLE_FILES[@]}"; do
             fi
             R2_REPAIRED_GZ="${REPAIR_DIR_SAMPLE}/${SAMPLE}_R2.repaired.fastq.gz"
            
-            # 2. Assembly 단계 (all, megahit 모드일 때만 실행)
-            if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "megahit" ]]; then
+            # 2. Assembly 단계 + Contig-level 분석 (all, megahit 모드 + binning/annotation 복구 모드도 포함)
+            if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "megahit" || "$RUN_MODE" == "binning" || "$RUN_MODE" == "annotation" ]]; then
                 if [ -f "$ASSEMBLY_SUCCESS_FLAG" ]; then
                     echo "[INFO] Assembly done for ${SAMPLE}" >> "$LOG_FILE"
                 else
