@@ -517,9 +517,15 @@ while true; do
 
                 MAG_RETRY_COUNT=0
                 while [ "$MAG_RETRY_COUNT" -le "$MAX_RETRIES" ]; do
-                    P2_CMD_ARRAY=( bash "${PROJECT_ROOT_DIR}/scripts/mag.sh" binning --output_dir "${P2_OUTPUT_DIR}" --raw_input_dir "${INPUT_DIR}" --kraken2_db "${KRAKEN2_DB}" --threads "${THREADS}" --parallel-jobs "${REAL_BATCH_SIZE}" --samples "${S_LIST}" )
+                    # 💡 [수정] all 및 annotation 모드처럼 DB 경로와 도구 설정을 완벽하게 전달하도록 확장!
+                    P2_CMD_ARRAY=( bash "${PROJECT_ROOT_DIR}/scripts/mag.sh" binning --output_dir "${P2_OUTPUT_DIR}" --raw_input_dir "${INPUT_DIR}" --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}" --eggnog_db_dir "${EGGNOG_DB}" --threads "${THREADS}" --parallel-jobs "${REAL_BATCH_SIZE}" --annotation-tool "${ANNOTATION_TOOL:-eggnog}" "${MAG_EXTRA_OPTS[@]}" --samples "${S_LIST}" )
+                    if [ "$SKIP_CONTIG_ANALYSIS" = true ]; then P2_CMD_ARRAY+=(--skip-contig-analysis); fi
+                    if [ "$SKIP_ANNOTATION" = true ]; then P2_CMD_ARRAY+=(--skip-annotation); fi
                     [[ -n "$METAWRAP_BINNING_OPTS" ]] && P2_CMD_ARRAY+=(--metawrap-binning-opts "$METAWRAP_BINNING_OPTS")
                     [[ -n "$METAWRAP_REFINEMENT_OPTS" ]] && P2_CMD_ARRAY+=(--metawrap-refinement-opts "$METAWRAP_REFINEMENT_OPTS")
+                    [[ -n "$GTDBTK_OPTS" ]] && P2_CMD_ARRAY+=(--gtdbtk-opts "$GTDBTK_OPTS")
+                    [[ -n "$BAKTA_OPTS" ]] && P2_CMD_ARRAY+=(--bakta-opts "$BAKTA_OPTS")
+                    [[ -n "$EGGNOG_OPTS" ]] && P2_CMD_ARRAY+=(--eggnog-opts "$EGGNOG_OPTS")
 
                     if "${P2_CMD_ARRAY[@]}"; then 
                         MAG_RETRY_COUNT=0
