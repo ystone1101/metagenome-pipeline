@@ -582,11 +582,11 @@ while true; do
                 log_info ">>> [Batch-ANNOTATION Recovery] Processing: ${TARGETS[*]}"
 
                 # 쉼표 변환 수행
-                # S_LIST=$(echo "${TARGETS[*]}" | tr ' ' ',')
+                S_LIST=$(echo "${TARGETS[*]}" | tr ' ' ',')
 
                 MAG_RETRY_COUNT=0
                 while [ "$MAG_RETRY_COUNT" -le "$MAX_RETRIES" ]; do
-                    P2_CMD_ARRAY=( bash "${PROJECT_ROOT_DIR}/scripts/mag.sh" annotation --output_dir "${P2_OUTPUT_DIR}" --raw_input_dir "${INPUT_DIR}" --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}" --eggnog_db_dir "${EGGNOG_DB}" --threads "${THREADS}" --parallel-jobs "${REAL_BATCH_SIZE}" --annotation-tool "${ANNOTATION_TOOL:-eggnog}" "${MAG_EXTRA_OPTS[@]}" --samples "${TARGETS[@]}" )
+                    P2_CMD_ARRAY=( bash "${PROJECT_ROOT_DIR}/scripts/mag.sh" annotation --output_dir "${P2_OUTPUT_DIR}" --raw_input_dir "${INPUT_DIR}" --kraken2_db "${KRAKEN2_DB}" --gtdbtk_db_dir "${GTDBTK_DB}" --bakta_db_dir "${BAKTA_DB}" --eggnog_db_dir "${EGGNOG_DB}" --threads "${THREADS}" --parallel-jobs "${REAL_BATCH_SIZE}" --annotation-tool "${ANNOTATION_TOOL:-eggnog}" "${MAG_EXTRA_OPTS[@]}" --samples "${S_LIST}" )
                     if [ "$SKIP_CONTIG_ANALYSIS" = true ]; then P2_CMD_ARRAY+=(--skip-contig-analysis); fi
                     if [ "$SKIP_ANNOTATION" = true ]; then P2_CMD_ARRAY+=(--skip-annotation); fi
                     [[ -n "$GTDBTK_OPTS" ]] && P2_CMD_ARRAY+=(--gtdbtk-opts "$GTDBTK_OPTS")
