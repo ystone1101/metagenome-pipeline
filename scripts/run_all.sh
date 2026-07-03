@@ -446,7 +446,7 @@ while true; do
             fi
         fi
     done
-    
+
     TOTAL_PENDING=$(( ${#PENDING_ALL[@]} + ${#PENDING_BINNING[@]} + ${#PENDING_ANNOT[@]} ))
 
     # 2. 작업 대기열 가동 (기존 배치 프레임워크 100% 재사용)
@@ -552,9 +552,26 @@ while true; do
                 # [수정] 이미 주석이 완료된 샘플은 배제하고 리스트를 다시 만듦
                 VALID_TARGETS=()
                 for s in "${PENDING_ANNOT[@]:i:REAL_BATCH_SIZE}"; do
+                    # 1. 원래 이름으로 폴더를 찾아봄
                     ANNOT_FILE="${P2_OUTPUT_DIR}/04_eggnog_on_contigs/${s}/${s}.emapper.annotations"
+                    
+                    # 2. 파일이 없으면 이름 뒤에 _1을 붙여서 다시 찾아봄
                     if [ ! -s "$ANNOT_FILE" ]; then
-                        VALID_TARGETS+=("$s")
+                        s_alt="${s}_1"
+                        ANNOT_FILE_ALT="${P2_OUTPUT_DIR}/04_eggnog_on_contigs/${s_alt}/${s_alt}.emapper.annotations"
+                        
+                        if [ -s "$ANNOT_FILE_ALT" ]; then
+                            # 파일이 발견됨! 그럼 보정된 이름(s_alt)을 사용
+                            continue # 이미 완료된 거니 스킵
+                        else
+                            # 진짜로 파일이 없는 것이니 VALID_TARGETS에 원래 이름 혹은 보정된 이름을 추가
+                            # (mag.sh에 전달될 이름을 결정해야 함)
+                            if [ -d "${P2_OUTPUT_DIR}/04_eggnog_on_contigs/${s}_1" ]; then
+                                VALID_TARGETS+=("${s}_1")
+                            else
+                                VALID_TARGETS+=("$s")
+                            fi
+                        fi
                     fi
                 done
                 
