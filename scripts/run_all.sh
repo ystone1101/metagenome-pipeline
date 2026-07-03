@@ -546,7 +546,19 @@ while true; do
         # ------------------------------------------------------------------
         if [ ${#PENDING_ANNOT[@]} -gt 0 ]; then
             for ((i=0; i<${#PENDING_ANNOT[@]}; i+=REAL_BATCH_SIZE)); do
-                TARGETS=("${PENDING_ANNOT[@]:i:REAL_BATCH_SIZE}")
+                # [수정] 이미 주석이 완료된 샘플은 배제하고 리스트를 다시 만듦
+                VALID_TARGETS=()
+                for s in "${PENDING_ANNOT[@]:i:REAL_BATCH_SIZE}"; do
+                    ANNOT_FILE="${P2_OUTPUT_DIR}/04_eggnog_on_contigs/${s}/${s}.emapper.annotations"
+                    if [ ! -s "$ANNOT_FILE" ]; then
+                        VALID_TARGETS+=("$s")
+                    fi
+                done
+                
+                # 진짜 할 일이 있는 샘플만 처리
+                if [ ${#VALID_TARGETS[@]} -eq 0 ]; then continue; fi
+                
+                TARGETS=("${VALID_TARGETS[@]}")
                 log_info ">>> [Batch-ANNOTATION Recovery] Processing: ${TARGETS[*]}"
 
                 # 쉼표 변환 수행
@@ -593,6 +605,24 @@ while true; do
         fi
     else
         log_warn "Reporting library not found. Skipping."
+    fi
+
+    # =======================================================
+    # [수정: 자동 종료 확인] 작업이 다 끝났으면 루프 탈출
+    # =======================================================
+    ALL_SAMPLES=($(ls -d ${RAW_DATA_DIR}/*))
+    PENDING_COUNT=0
+    for s_path in "${ALL_SAMPLES[@]}"; do
+        s=$(basename "$s_path" | sed -E "s/_([0-9]+)$//")
+        ANNOT_FILE="${OUTPUT_DIR}/2_mag_analysis/04_eggnog_on_contigs/${s}/${s}.emapper.annotations"
+        if [ ! -s "$ANNOT_FILE" ]; then
+            PENDING_COUNT=$((PENDING_COUNT + 1))
+        fi
+    done
+
+    if [ "$PENDING_COUNT" -eq 0 ]; then
+        log_info "🎉 모든 작업 완수. 프로세스를 종료합니다."
+        break
     fi
 
     # =======================================================
