@@ -420,6 +420,7 @@ export LAST_PRINT_LINES=0
 # 🎯 [스마트 필터망 이식] 전체 조사 vs 낙오자 저격 분기 수집 공정
 # ==============================================================================
 declare -a TARGET_SAMPLE_FILES=()
+declare -a TARGET_SAMPLE_NAMES=()
 
 if [[ -n "${SAMPLES_ARG:-}" ]]; then
     log_info "🎯 Targeted Recovery Mode Active. Filtering specific failed samples: $SAMPLES_ARG"
@@ -429,7 +430,11 @@ if [[ -n "${SAMPLES_ARG:-}" ]]; then
         if [[ -z "$MATCH_FILE" && -n "$INPUT_DIR_ARG" ]]; then
             MATCH_FILE=$(find "${INPUT_DIR_ARG}" -maxdepth 1 -name "${s_id}*_1.fastq.gz" 2>/dev/null | head -n 1)
         fi
-        [[ -n "$MATCH_FILE" ]] && TARGET_SAMPLE_FILES+=("$MATCH_FILE")
+        if
+            [[ -n "$MATCH_FILE" ]]: then 
+            TARGET_SAMPLE_FILES+=("$MATCH_FILE")
+            TARGET_SAMPLE_NAMES+=("$s_id")
+        fi
     done
 else
     for f in "${QC_READS_DIR}"/*_1.fastq.gz; do
@@ -455,7 +460,9 @@ fi
 # ==============================================================================
 # 메인 루프 시동 (TARGET_SAMPLE_FILES 기반 배열 처리)
 # ==============================================================================
-for R1_QC_GZ in "${TARGET_SAMPLE_FILES[@]}"; do
+for TARGET_IDX in "${!TARGET_SAMPLE_FILES[@]}"; do
+    R1_QC_GZ="${TARGET_SAMPLE_FILES[$TARGET_IDX]}"
+    PRESET_SAMPLE_NAME="${TARGET_SAMPLE_NAMES[$TARGET_IDX]:-}"
 
     if [ -f "$RESTART_SIGNAL_FILE" ]; then
         log_warn "Restart signal detected. Stopping new job submission."
@@ -478,7 +485,11 @@ for R1_QC_GZ in "${TARGET_SAMPLE_FILES[@]}"; do
         if [[ ! -f "$R1_QC_GZ" ]]; then exit 0; fi
 
         SAMPLE_BASE=$(basename "$R1_QC_GZ")
-        SAMPLE=$(echo "$SAMPLE_BASE" | sed -E 's/(_1|_2|_R1|_R2)\.fastq\.gz$//' | sed -E 's/(_kneaddata|_paired|_unpaired|_fastp).*//')
+        if [[ -n "$PRESET_SAMPLE_NAME" ]]; then
+            SAMPLE="$PRESET_SAMPLE_NAME"
+        else
+            SAMPLE=$(echo "$SAMPLE_BASE" | sed -E 's/(_1|_2|_R1|_R2)\.fastq\.gz$//' | sed -E 's/(_kneaddata|_paired|_unpaired|_fastp).*//')
+        fi    
         R2_QC_GZ="${R1_QC_GZ/_1.fastq.gz/_2.fastq.gz}"
 
         echo ">>> [CHECK] Sample ID: $SAMPLE"
