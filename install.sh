@@ -21,6 +21,7 @@ YML_FILES=(
     "environments/metawrap_env.yml"
     "environments/gtdbtk_env.yml"
     "environments/bakta_env.yml"
+    "environments/eggnog_env.yml"
 )
 
 log_info "Starting Dokkaebi Pipeline environment setup..."

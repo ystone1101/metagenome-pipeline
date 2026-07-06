@@ -1,9 +1,9 @@
 name: metawrap_env
 channels:
-  - ursky
-  - bioconda
   - conda-forge
+  - bioconda
   - defaults
+  - ursky
 dependencies:
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=2_gnu
