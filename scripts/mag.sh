@@ -420,7 +420,7 @@ export LAST_PRINT_LINES=0
 # 🎯 [스마트 필터망 이식] 전체 조사 vs 낙오자 저격 분기 수집 공정
 # ==============================================================================
 declare -a TARGET_SAMPLE_FILES=()
-declare -a TARGET_SAMPLE_NAMES=()
+declare -a TARGET_SAMPLE_NAMES=()   # --samples 모드에서 run_all.sh가 넘겨준 "진짜" 샘플명을 보존 (파일명 재추출 방지)
 
 if [[ -n "${SAMPLES_ARG:-}" ]]; then
     log_info "🎯 Targeted Recovery Mode Active. Filtering specific failed samples: $SAMPLES_ARG"
@@ -430,8 +430,7 @@ if [[ -n "${SAMPLES_ARG:-}" ]]; then
         if [[ -z "$MATCH_FILE" && -n "$INPUT_DIR_ARG" ]]; then
             MATCH_FILE=$(find "${INPUT_DIR_ARG}" -maxdepth 1 -name "${s_id}*_1.fastq.gz" 2>/dev/null | head -n 1)
         fi
-        if
-            [[ -n "$MATCH_FILE" ]]: then 
+        if [[ -n "$MATCH_FILE" ]]; then
             TARGET_SAMPLE_FILES+=("$MATCH_FILE")
             TARGET_SAMPLE_NAMES+=("$s_id")
         fi
@@ -486,10 +485,14 @@ for TARGET_IDX in "${!TARGET_SAMPLE_FILES[@]}"; do
 
         SAMPLE_BASE=$(basename "$R1_QC_GZ")
         if [[ -n "$PRESET_SAMPLE_NAME" ]]; then
+            # run_all.sh가 --samples로 넘긴 이름을 그대로 사용합니다. 파일명에서 다시 추출하면
+            # 샘플명 자체에 "_1" 같은 패턴이 들어있을 때 잘못된 이름(예: 실제 존재하는
+            # 01_assembly/KGDM_BDC_013_04 대신 KGDM_BDC_013_04_1)을 만들어내어, 이미 끝난
+            # Assembly/Post-Assembly 결과를 못 찾고 엉뚱한 새 폴더를 만들게 됩니다.
             SAMPLE="$PRESET_SAMPLE_NAME"
         else
             SAMPLE=$(echo "$SAMPLE_BASE" | sed -E 's/(_1|_2|_R1|_R2)\.fastq\.gz$//' | sed -E 's/(_kneaddata|_paired|_unpaired|_fastp).*//')
-        fi    
+        fi
         R2_QC_GZ="${R1_QC_GZ/_1.fastq.gz/_2.fastq.gz}"
 
         echo ">>> [CHECK] Sample ID: $SAMPLE"
@@ -599,27 +602,36 @@ for TARGET_IDX in "${!TARGET_SAMPLE_FILES[@]}"; do
             fi
             R2_REPAIRED_GZ="${REPAIR_DIR_SAMPLE}/${SAMPLE}_R2.repaired.fastq.gz"
            
-            # 2. Assembly 단계 + Contig-level 분석 (all, megahit 모드 + binning/annotation 복구 모드도 포함)
-            if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "megahit" || "$RUN_MODE" == "binning" || "$RUN_MODE" == "annotation" ]]; then
+            # 2. Assembly 단계 (all, megahit 모드일 때만 실행 -- binning/annotation 복구 모드는
+            # Repair 단계를 건너뛰므로 여기서 MEGAHIT을 재실행하면 복구된 리드 파일이 없어
+            # 반드시 실패하고, 심지어 기존 (불완전한) assembly 폴더를 삭제해버립니다.
+            # 그래서 Assembly 재실행 자체는 절대 binning/annotation 모드로 확장하면 안 됩니다.)
+            if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "megahit" ]]; then
                 if [ -f "$ASSEMBLY_SUCCESS_FLAG" ]; then
                     echo "[INFO] Assembly done for ${SAMPLE}" >> "$LOG_FILE"
                 else
                     set_job_status "$SAMPLE" "Waiting for Assembly Solt..."
                     set_job_status "$SAMPLE" "Running Assembly (MEGAHIT)..."
                     run_megahit "$SAMPLE" "$R1_REPAIRED_GZ" "$R2_REPAIRED_GZ" "$ASSEMBLY_OUT_DIR_SAMPLE" "$MEGAHIT_PRESET_TO_USE" "$MEMORY_GB" "$MIN_CONTIG_LEN" "$THREADS" "$MEGAHIT_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
-                    
-                    if [ $? -eq 0 ]; then 
-                        touch "$ASSEMBLY_SUCCESS_FLAG" 
-                    else 
+
+                    if [ $? -eq 0 ]; then
+                        touch "$ASSEMBLY_SUCCESS_FLAG"
+                    else
                         log_warn "Assembly for ${SAMPLE} failed."
                         exit 0
                     fi
                 fi
-                
-                if [ -f "$POST_ASSEMBLY_SUCCESS_FLAG" ]; then 
-                    echo "[INFO] Post-Assembly previously marked done for ${SAMPLE}. Re-verifying sub-steps..." >> "$LOG_FILE" 
+            fi
+
+            # 3. Post-Assembly 분석 (Stats/Kraken2/Contig Annotation) -- all, megahit, binning,
+            # annotation 모드 전부 포함. binning/annotation 복구 모드도 여기서 누락된 분석을
+            # 채울 수 있어야 하므로, (예전 버전 흔적으로 없을 수 있는) ASSEMBLY_SUCCESS_FLAG
+            # 대신 실제 조립 결과 파일(ASSEMBLY_FA)이 있는지로 안전하게 판단합니다.
+            if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "megahit" || "$RUN_MODE" == "binning" || "$RUN_MODE" == "annotation" ]]; then
+                if [ -f "$POST_ASSEMBLY_SUCCESS_FLAG" ]; then
+                    echo "[INFO] Post-Assembly previously marked done for ${SAMPLE}. Re-verifying sub-steps..." >> "$LOG_FILE"
                 fi
-                { 
+                if [ -f "$ASSEMBLY_FA" ]; then
                     STATS_SUCCESS_FLAG="${ASSEMBLY_STATS_DIR}/.${SAMPLE}.stats.success"
                     KRAKEN_CONTIGS_FLAG="${KRAKEN_ON_CONTIGS_DIR}/.${SAMPLE}.kraken.success"
                     if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
@@ -628,54 +640,54 @@ for TARGET_IDX in "${!TARGET_SAMPLE_FILES[@]}"; do
                         ANNO_CONTIGS_FLAG="${EGGNOG_ON_CONTIGS_DIR}/.${SAMPLE}.anno.success"
                     fi
 
-                    if [ -f "$ASSEMBLY_SUCCESS_FLAG" ]; then
-                        log_info "Starting post-assembly analysis for ${SAMPLE}..."
+                    log_info "Starting post-assembly analysis for ${SAMPLE}..."
 
-                        if [ ! -f "$STATS_SUCCESS_FLAG" ]; then                    
-                            set_job_status "$SAMPLE" "Running Post-Assembly Stats..."
-                            STATS_OUT_FILE="${ASSEMBLY_STATS_DIR}/${SAMPLE}_assembly_stats.txt"
-                            conda run -n "$BBMAP_ENV" stats.sh in="$ASSEMBLY_FA" > "$STATS_OUT_FILE"
-                            touch "$STATS_SUCCESS_FLAG"
+                    if [ ! -f "$STATS_SUCCESS_FLAG" ]; then
+                        set_job_status "$SAMPLE" "Running Post-Assembly Stats..."
+                        STATS_OUT_FILE="${ASSEMBLY_STATS_DIR}/${SAMPLE}_assembly_stats.txt"
+                        conda run -n "$BBMAP_ENV" stats.sh in="$ASSEMBLY_FA" > "$STATS_OUT_FILE"
+                        touch "$STATS_SUCCESS_FLAG"
+                    fi
+
+                    if [ "$SKIP_CONTIG_ANALYSIS" = false ]; then
+                        if [ ! -f "$KRAKEN_CONTIGS_FLAG" ]; then
+                            set_job_status "$SAMPLE" "Waiting for Kraken2 Slot..."
+                            (
+                                flock 9
+                                set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
+                                KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
+                                run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_CONTIGS_SUMMARY_TSV" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                            ) 9>"$HEAVY_JOB_LOCK"
+                            touch "$KRAKEN_CONTIGS_FLAG"
+                        else
+                            echo "[INFO] Kraken2 on contigs done for ${SAMPLE}" >> "$LOG_FILE"
                         fi
 
-                        if [ "$SKIP_CONTIG_ANALYSIS" = false ]; then
-                            if [ ! -f "$KRAKEN_CONTIGS_FLAG" ]; then
-                                set_job_status "$SAMPLE" "Waiting for Kraken2 Slot..."
-                                (
-                                    flock 9
-                                    set_job_status "$SAMPLE" "Running Kraken2 on Contigs..."
-                                    KRAKEN_CONTIGS_OUT_DIR_SAMPLE="${KRAKEN_ON_CONTIGS_DIR}/${SAMPLE}"
-                                    run_kraken2_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$KRAKEN_CONTIGS_OUT_DIR_SAMPLE" "$KRAKEN2_DB_ARG" "$THREADS" "$KRAKEN2_CONTIGS_SUMMARY_TSV" "$KRAKEN2_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
-                                ) 9>"$HEAVY_JOB_LOCK"
-                                touch "$KRAKEN_CONTIGS_FLAG"
-                            else
-                                echo "[INFO] Kraken2 on contigs done for ${SAMPLE}" >> "$LOG_FILE"
-                            fi
-                                
-                            if [ "$SKIP_ANNOTATION" = false ]; then
-                                if [ ! -f "$ANNO_CONTIGS_FLAG" ]; then
-                                    if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
-                                        set_job_status "$SAMPLE" "Running Bakta on Contigs..."
-                                        BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
-                                        run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
-                                    elif [[ "$ANNOTATION_TOOL" == "eggnog" ]]; then
-                                        set_job_status "$SAMPLE" "Running EggNOG on Contigs..."
-                                        EGGNOG_CONTIGS_OUT_DIR_SAMPLE="${EGGNOG_ON_CONTIGS_DIR}/${SAMPLE}"
-                                        run_eggnog_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$EGGNOG_CONTIGS_OUT_DIR_SAMPLE" "$EGGNOG_DB_DIR_ARG" "$EGGNOG_EXTRA_OPTS" "$EGGNOG_SUMMARY_CSV" >> "$LOG_FILE" 2>&1
-                                    fi
-                                    touch "$ANNO_CONTIGS_FLAG"
-                                else
-                                    echo "[INFO] Contig Annotation done for ${SAMPLE}" >> "$LOG_FILE"
+                        if [ "$SKIP_ANNOTATION" = false ]; then
+                            if [ ! -f "$ANNO_CONTIGS_FLAG" ]; then
+                                if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
+                                    set_job_status "$SAMPLE" "Running Bakta on Contigs..."
+                                    BAKTA_CONTIGS_OUT_DIR_SAMPLE="${BAKTA_ON_CONTIGS_DIR}/${SAMPLE}"; mkdir -p "$BAKTA_CONTIGS_OUT_DIR_SAMPLE"
+                                    run_bakta_for_contigs "$SAMPLE" "$ASSEMBLY_OUT_DIR_SAMPLE" "$BAKTA_CONTIGS_OUT_DIR_SAMPLE" "$BAKTA_DB_DIR_ARG" "$TMP_DIR_ARG" "$BAKTA_EXTRA_OPTS" >> "$LOG_FILE" 2>&1
+                                elif [[ "$ANNOTATION_TOOL" == "eggnog" ]]; then
+                                    set_job_status "$SAMPLE" "Running EggNOG on Contigs..."
+                                    EGGNOG_CONTIGS_OUT_DIR_SAMPLE="${EGGNOG_ON_CONTIGS_DIR}/${SAMPLE}"
+                                    run_eggnog_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$EGGNOG_CONTIGS_OUT_DIR_SAMPLE" "$EGGNOG_DB_DIR_ARG" "$EGGNOG_EXTRA_OPTS" "$EGGNOG_SUMMARY_CSV" >> "$LOG_FILE" 2>&1
                                 fi
+                                touch "$ANNO_CONTIGS_FLAG"
                             else
-                                echo "[INFO] Skipping Contig Annotation (--skip-annotation enabled)." >> "$LOG_FILE"
+                                echo "[INFO] Contig Annotation done for ${SAMPLE}" >> "$LOG_FILE"
                             fi
                         else
-                            echo "[INFO] Skipping ALL contig analysis." >> "$LOG_FILE"
+                            echo "[INFO] Skipping Contig Annotation (--skip-annotation enabled)." >> "$LOG_FILE"
                         fi
-                        touch "$POST_ASSEMBLY_SUCCESS_FLAG"
+                    else
+                        echo "[INFO] Skipping ALL contig analysis." >> "$LOG_FILE"
                     fi
-                }
+                    touch "$POST_ASSEMBLY_SUCCESS_FLAG"
+                else
+                    log_warn "Assembly file (${ASSEMBLY_FA}) not found for ${SAMPLE}. Cannot run post-assembly analysis; sample needs a full 'all' mode re-run."
+                fi
             fi
 
             # 🎯 [수정 4단계 이식망] 복구 분기를 포괄하도록 공정 마스킹 확장 (Binning 및 후속 공정 통합)
