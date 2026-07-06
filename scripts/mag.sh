@@ -606,8 +606,9 @@ for R1_QC_GZ in "${TARGET_SAMPLE_FILES[@]}"; do
                 fi
                 
                 if [ -f "$POST_ASSEMBLY_SUCCESS_FLAG" ]; then 
-                    echo "[INFO] Post-Assembly done for ${SAMPLE}" >> "$LOG_FILE" 
-                else
+                    echo "[INFO] Post-Assembly previously marked done for ${SAMPLE}. Re-verifying sub-steps..." >> "$LOG_FILE" 
+                fi
+                { 
                     STATS_SUCCESS_FLAG="${ASSEMBLY_STATS_DIR}/.${SAMPLE}.stats.success"
                     KRAKEN_CONTIGS_FLAG="${KRAKEN_ON_CONTIGS_DIR}/.${SAMPLE}.kraken.success"
                     if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
@@ -663,7 +664,7 @@ for R1_QC_GZ in "${TARGET_SAMPLE_FILES[@]}"; do
                         fi
                         touch "$POST_ASSEMBLY_SUCCESS_FLAG"
                     fi
-                fi
+                }
             fi
 
             # 🎯 [수정 4단계 이식망] 복구 분기를 포괄하도록 공정 마스킹 확장 (Binning 및 후속 공정 통합)
