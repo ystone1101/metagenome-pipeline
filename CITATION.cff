@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Dokkaebi: A Reproducible Metagenome-Assembled Genome (MAG) Recovery Pipeline"
+type: software
+authors:
+  - family-names: "KIM"
+    given-names: "YONG-SEOK"
+    # orcid: "https://orcid.org/0000-0001-8795-236X"
+repository-code: "https://github.com/ystone1101/metagenome-pipeline"
+license: MIT
+version: "1.0.0"
+date-released: "2026-07-09"

@@ -1,11 +1,12 @@
 #!/bin/bash
 
 # ==============================================================================
-# 1. 설정
+# 1. 설정 (BASE_DIR / RAW_DATA_DIR 환경변수로 오버라이드 가능)
+#   예: BASE_DIR=/data/my_project/results RAW_DATA_DIR=/data/my_project/raw_data bash scripts/monitor_stages.sh
 # ==============================================================================
-BASE_DIR="/data/CDC_2024ER110301/results"
-RAW_DATA_DIR="/data/CDC_2024ER110301/raw_data"
-REFRESH_RATE=30
+BASE_DIR="${BASE_DIR:-/data/CDC_2024ER110301/results}"
+RAW_DATA_DIR="${RAW_DATA_DIR:-/data/CDC_2024ER110301/raw_data}"
+REFRESH_RATE="${REFRESH_RATE:-30}"
 
 # ==============================================================================
 # 2. 색상 및 유틸리티

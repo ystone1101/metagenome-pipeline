@@ -1,7 +1,9 @@
 #!/bin/bash
 
-# 🎯 1. 전체 결과가 저장된 상위 경로 설정 (환경에 맞춰 수정하세요!)
-BASE_DIR="/data/CDC_2024ER110301/results/2_mag_analysis"
+# 🎯 1. 전체 결과가 저장된 상위 경로 설정
+# BASE_DIR 환경변수로 오버라이드 가능합니다. 예:
+#   BASE_DIR=/data/my_project/results/2_mag_analysis bash scripts/cleanup.sh
+BASE_DIR="${BASE_DIR:-/data/CDC_2024ER110301/results/2_mag_analysis}"
 
 echo "=================================================="
 echo "🚀 파이프라인 전역 다이어트(디스크 최적화) 시작!"

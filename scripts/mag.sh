@@ -79,7 +79,7 @@ print_usage() {
     echo "  --bakta_db_dir PATH      - (Required for all modes) Path to the Bakta database."
     echo "  --eggnog_db_dir PATH     - (Required if using EggNOG) Path to the EggNOG database."
     echo "  --kraken2_db PATH        - (Required) Path to the Kraken2 database."    
-    echo "  --tmp_dir PATH           - Path to a temporary directory. (Default: /home/kys/Desktop/tmp)"
+    echo "  --tmp_dir PATH           - Path to a temporary directory. (Default: a new folder under '<output_dir>/tmp_workspace')"
     echo ""
     echo -e "${CYAN}${BOLD}Tool-specific Options (pass-through):${NC}"
     echo "  --annotation-tool STR   Tool for Contig annotation: 'eggnog' (default) or 'bakta'"
@@ -368,6 +368,8 @@ if [[ -n "$GTDBTK_DATA_PATH" ]]; then log_info "GTDB-Tk DB path : ${GTDBTK_DATA_
 log_info "Bakta DB path   : ${BAKTA_DB_DIR_ARG}"
 log_info "EggNOG DB path  : ${EGGNOG_DB_DIR_ARG}"
 log_info "------------------------------"
+
+check_disk_space "$MAG_BASE_DIR" "${DISK_SPACE_MIN_GB:-20}"
 
 log_info "Checking MAG pipeline dependencies for mode: ${RUN_MODE}"
 if [[ "$RUN_MODE" == "all" || "$RUN_MODE" == "megahit" ]]; then

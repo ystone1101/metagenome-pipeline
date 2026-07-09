@@ -55,6 +55,8 @@ run_megahit() {
         return 0
     fi
 
+    check_disk_space "$assembly_out_dir" "${DISK_SPACE_MIN_GB:-20}"
+
     # 2. 최종 결과는 없지만, 중간 체크포인트 파일이 있으면 --continue 옵션으로 재개
     if [[ -f "$checkpoint_file" ]]; then
         log_info "${sample_name}: Found MEGAHIT checkpoint file. Resuming with --continue option..."
@@ -131,8 +133,7 @@ run_bakta_for_contigs() {
     local sample_name=$1; local assembly_dir=$2; local out_dir=$3; local bakta_db_path=$4; local tmp_dir=$5; local extra_opts="${6:-}"
     
     log_info "${sample_name}: Running Bakta annotation on assembled contigs..."
-#    mkdir -p "$out_dir"
-    
+
     local contig_file="${assembly_dir}/final.contigs.fa"
     local final_gff_file="${out_dir}/${sample_name}.gff3"
 
@@ -146,15 +147,6 @@ run_bakta_for_contigs() {
         return 0
     fi
 
-#    # --- 변경점: 최종 결과 파일 경로를 샘플 디렉토리 바로 아래로 지정 ---
-#    local final_gff_file="${out_dir}/${sample_name}.gff3"
-#
-#    # Checkpoint: 최종 gff3 파일이 있는지 확인
-#    if [[ -f "$final_gff_file" ]]; then
-#        log_info "Bakta annotation for contigs of ${sample_name} already exists. Skipping."
-#        return 0
-#    fi
-    
     local bakta_options=("--threads" "$THREADS" "--meta" "--skip-plot" "--tmp-dir" "$tmp_dir")
     if [[ -n "$bakta_db_path" ]]; then
         bakta_options+=(--db "$bakta_db_path")
@@ -164,13 +156,6 @@ run_bakta_for_contigs() {
         log_info "Previous incomplete output found. Overwriting..."
         bakta_options+=(--force)
     fi
-
-#    conda run -n "$BAKTA_ENV" bakta \
-#        --output "$out_dir" \
-#        --prefix "$sample_name" \
-#        "${bakta_options[@]}" \
-#        $extra_opts \
-#        "$contig_file"
 
     # [수정 3] Conda Activate 방식 적용 (Conda 경로 자동 탐지)
     (
@@ -330,6 +315,8 @@ run_metawrap_sample() {
 
     local read_qc_dir="${metawrap_sample_dir}/read_qc"
     local temp_uncompressed_dir="${metawrap_sample_dir}/temp_uncompressed_reads"
+
+    check_disk_space "$metawrap_sample_dir" "${DISK_SPACE_MIN_GB:-20}"
 
     # 1. pigz를 사용하여 복구된 파일을 MetaWRAP용으로 압축 해제
     mkdir -p "$temp_uncompressed_dir"
