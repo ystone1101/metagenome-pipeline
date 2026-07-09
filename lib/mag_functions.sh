@@ -204,7 +204,6 @@ run_bakta_for_mags() {
     # === [설정] 동시 실행할 Bakta 개수 ===
     # (주의: Bakta 하나당 메모리를 꽤 쓰므로 2~4개 추천)
     # local MAX_BAKTA_JOBS=4 
-    local cur_threads=${THREADS:-1}
     local THREADS_REQ_PER_BAKTA=4
 
     local MAX_BAKTA_JOBS=$(( THREADS / THREADS_REQ_PER_BAKTA ))
