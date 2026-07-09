@@ -621,3 +621,51 @@ check_annotation_ratio() {
         fi
     fi
 }
+
+#--- [Functional Pathway] Read를 contig에 재매핑하여 유전자별 coverage 계산 ---
+# EggNOG annotation의 KEGG_Pathway/CAZy를 read-mapping 기반 coverage로 가중치를
+# 매기기 위한 전 단계. Prodigal이 만든 유전자 fasta(.ffn)의 헤더가 BBMap
+# pileup.sh의 fastaorf 모드가 기대하는 형식과 호환되므로 별도 GFF 파싱 없이
+# 바로 사용합니다.
+run_gene_coverage() {
+    local sample_name=$1; local assembly_file=$2; local gene_ffn=$3
+    local r1_reads=$4; local r2_reads=$5; local out_dir=$6; local threads="${7:-$THREADS}"
+
+    mkdir -p "$out_dir"
+    local coverage_file="${out_dir}/${sample_name}_gene_coverage.tsv"
+
+    if [[ -s "$coverage_file" ]]; then
+        log_info "${sample_name}: Gene-level coverage already calculated. Skipping."
+        return 0
+    fi
+    if [[ ! -f "$gene_ffn" ]]; then
+        log_warn "${sample_name}: Gene FASTA (${gene_ffn}) not found. Skipping coverage calculation."
+        return 1
+    fi
+    if [[ ! -f "$r1_reads" || ! -f "$r2_reads" ]]; then
+        log_warn "${sample_name}: Clean reads not found for coverage mapping. Skipping."
+        return 1
+    fi
+
+    log_info "${sample_name}: Mapping reads back to contigs for gene-level coverage (BBMap)..."
+    (
+        CONDA_BASE=$(conda info --base)
+        if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
+            source "${CONDA_BASE}/etc/profile.d/conda.sh"
+        else
+            source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh
+        fi
+        conda activate "$BBMAP_ENV"
+
+        bbmap.sh ref="$assembly_file" in="$r1_reads" in2="$r2_reads" \
+            out=stdout.sam nodisk threads="$threads" ambiguous=random 2>>"$LOG_FILE" \
+        | pileup.sh in=stdin.sam ref="$assembly_file" fastaorf="$gene_ffn" \
+            outorf="$coverage_file" overwrite=t 32bit=t 2>>"$LOG_FILE"
+    )
+
+    if [[ ! -s "$coverage_file" ]]; then
+        log_warn "${sample_name}: Gene coverage calculation produced no output."
+        return 1
+    fi
+    log_info "${sample_name}: Gene-level coverage calculation complete (${coverage_file})."
+}

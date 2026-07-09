@@ -328,7 +328,7 @@ mkdir -p "$MAG_BASE_DIR" "$REPAIR_DIR" "$ASSEMBLY_DIR" "$ASSEMBLY_STATS_DIR" \
 if [[ "$ANNOTATION_TOOL" == "bakta" ]]; then
     mkdir -p "$BAKTA_ON_CONTIGS_DIR"
 elif [[ "$ANNOTATION_TOOL" == "eggnog" ]]; then
-    mkdir -p "$EGGNOG_ON_CONTIGS_DIR"
+    mkdir -p "$EGGNOG_ON_CONTIGS_DIR" "$GENE_COVERAGE_DIR" "$PATHWAY_SUMMARY_DIR"
 fi
 
 KRAKEN2_CONTIGS_SUMMARY_TSV="${MAG_BASE_DIR}/kraken2_contigs_summary.tsv"
@@ -674,6 +674,11 @@ for TARGET_IDX in "${!TARGET_SAMPLE_FILES[@]}"; do
                                     set_job_status "$SAMPLE" "Running EggNOG on Contigs..."
                                     EGGNOG_CONTIGS_OUT_DIR_SAMPLE="${EGGNOG_ON_CONTIGS_DIR}/${SAMPLE}"
                                     run_eggnog_on_contigs "$SAMPLE" "$ASSEMBLY_FA" "$EGGNOG_CONTIGS_OUT_DIR_SAMPLE" "$EGGNOG_DB_DIR_ARG" "$EGGNOG_EXTRA_OPTS" "$EGGNOG_SUMMARY_CSV" >> "$LOG_FILE" 2>&1
+
+                                    set_job_status "$SAMPLE" "Mapping reads for gene coverage..."
+                                    run_gene_coverage "$SAMPLE" "$ASSEMBLY_FA" "${EGGNOG_CONTIGS_OUT_DIR_SAMPLE}/${SAMPLE}.ffn" \
+                                        "$R1_QC_GZ" "$R2_QC_GZ" "${GENE_COVERAGE_DIR}/${SAMPLE}" "$THREADS" >> "$LOG_FILE" 2>&1 \
+                                        || log_warn "Gene coverage mapping failed for ${SAMPLE} (pathway summary will skip this sample)."
                                 fi
                                 touch "$ANNO_CONTIGS_FLAG"
                             else
@@ -773,6 +778,20 @@ done
 log_info "Waiting for all parallel MAG jobs to finish..."
 wait
 log_info "All MAG parallel jobs finished."
+
+if [[ "$ANNOTATION_TOOL" == "eggnog" && "$SKIP_ANNOTATION" == "false" && "$SKIP_CONTIG_ANALYSIS" == "false" ]]; then
+    log_info "Aggregating read-mapping-based KEGG Pathway / CAZy abundance across samples..."
+    PATHWAY_SCRIPT="${PROJECT_ROOT_DIR}/lib/generate_pathway_summary.py"
+    if [ -f "$PATHWAY_SCRIPT" ]; then
+        conda run -n "$EGGNOG_ENV" python "$PATHWAY_SCRIPT" \
+            --eggnog_dir "$EGGNOG_ON_CONTIGS_DIR" \
+            --coverage_dir "$GENE_COVERAGE_DIR" \
+            --output_dir "$PATHWAY_SUMMARY_DIR" >> "$LOG_FILE" 2>&1 \
+            || log_warn "Pathway summary aggregation failed. Check ${LOG_FILE} for details."
+    else
+        log_warn "Pathway summary script not found: $PATHWAY_SCRIPT"
+    fi
+fi
 
 if [[ -n "${DASHBOARD_PID:-}" ]]; then
     kill "$DASHBOARD_PID" 2>/dev/null

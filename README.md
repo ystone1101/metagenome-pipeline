@@ -241,6 +241,8 @@ When the `all` command is executed, the specified output directory will have the
     ├── 05_metawrap/            # MetaWRAP binning and refinement results
     ├── 06_gtdbtk_on_mags/      # GTDB-Tk classification results for final MAGs
     ├── 07_bakta_on_mags/       # Bakta functional annotation results for final MAGs
+    ├── 08_gene_coverage/       # Per-gene read-mapping coverage (BBMap), eggnog mode only
+    ├── 09_functional_pathways/ # Read-mapping-weighted KEGG Pathway / CAZy abundance tables
     └── 3_mag_per_sample_*.log  # Main log file for the MAG pipeline
 ```
 
@@ -249,7 +251,6 @@ When the `all` command is executed, the specified output directory will have the
 ## Future Work
 
   - **Pangenome Analysis**: Add a pangenome analysis pipeline using `Roary` or `PPanGGOLiN`.
-  - **Metabolic Pathway Analysis**: Add a metabolic pathway reconstruction pipeline using `KEGG` or `MetaCyc` databases.
   - **Visualization**: Develop an interactive results visualization dashboard using `R/Shiny` or `Python/Dash`.
 
 -----
