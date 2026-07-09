@@ -550,7 +550,7 @@ if [[ "$MODE" == "host" ]]; then
         # 인자 1: 로그 폴더 ($KNEADDATA_LOG)
         # 인자 2: 저장할 CSV 파일 ($SUMMARY_CSV)
         
-        conda run -n "$KNEADDATA_ENV" python "$QC_REPORT_SCRIPT" "$KNEADDATA_LOG" "$SUMMARY_CSV" >> "$LOG_FILE" 2>&1 || log_warn "Failed to generate QC Summary CSV."
+        conda run -n "$KNEADDATA_ENV" python "$QC_REPORT_SCRIPT" "$KNEADDATA_LOG" "$SUMMARY_CSV" "$KRAKEN2_SUMMARY_TSV" >> "$LOG_FILE" 2>&1 || log_warn "Failed to generate QC Summary CSV."
         
         if [ -f "$SUMMARY_CSV" ]; then
             log_info "QC Summary Report saved to: $SUMMARY_CSV"

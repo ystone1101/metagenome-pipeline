@@ -128,6 +128,9 @@ dependencies:
   - numpy=1.26.4=py311h64a7726_0
   - openjdk=11.0.9.1=h5cc2fde_1
   - openjpeg=2.4.0=hb52868f_1
+  # openpyxl: 정확한 빌드 해시를 검증 못했습니다(이 환경을 직접 solve 해본 적 없음).
+  # 설치 후 `conda env export` 로 재추출해서 정확한 버전으로 교체해주세요.
+  - openpyxl>=3.0
   - openssl=1.1.1w=hd590300_0
   - packaging=25.0=pyh29332c3_1
   - pandas=2.3.2=py311hed34c8f_0
