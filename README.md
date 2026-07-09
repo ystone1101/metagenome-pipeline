@@ -232,6 +232,7 @@ When the `all` command is executed, the specified output directory will have the
 │   ├── 02_kraken2/             # Raw Kraken2 results
 │   ├── 03_bracken/             # Raw Bracken results
 │   ├── 05_bracken_merged/      # Merged Bracken result tables for all samples
+│   ├── 07_diversity_analysis/  # Alpha (Shannon/Simpson/...) and Beta diversity results
 │   ├── logs/                   # Detailed logs from KneadData/fastp
 │   └── kraken2_summary.tsv     # Summary of Kraken2 classification statistics
 │

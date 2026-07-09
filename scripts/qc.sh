@@ -160,6 +160,10 @@ if [[ ! -f "$KRAKEN2_SUMMARY_TSV" ]]; then echo -e "Sample\tTotal\tClassified\tC
 # --- 6. 설정 및 함수 파일 로드 ---
 source "${PROJECT_ROOT_DIR}/config/pipeline_config.sh"
 source "${PROJECT_ROOT_DIR}/lib/pipeline_functions.sh"
+if [ "$QC_ONLY_MODE" = false ]; then
+    source "${PROJECT_ROOT_DIR}/config/diversity_config.sh"
+    source "${PROJECT_ROOT_DIR}/lib/diversity_functions.sh"
+fi
 LOG_FILE="${BASE_DIR}/1_microbiome_analysis_$(date +%Y%m%d_%H%M%S).log"; > "$LOG_FILE"
 trap '_error_handler' ERR
 
@@ -183,6 +187,9 @@ check_conda_dependency "$KRAKEN_ENV" "kraken2"; check_conda_dependency "$KRAKEN_
 if [[ "$MODE" == "host" ]]; then check_conda_dependency "$KNEADDATA_ENV" "kneaddata"; fi
 if [[ "$MODE" == "environmental" ]]; then check_conda_dependency "$KNEADDATA_ENV" "fastqc"; check_conda_dependency "$FASTP_ENV" "fastp"; fi
 check_conda_dependency "$KNEADDATA_ENV" "multiqc"
+if [ "$QC_ONLY_MODE" = false ]; then
+    check_conda_dependency "$KRAKEN_ENV" "alpha_diversity.py"; check_conda_dependency "$KRAKEN_ENV" "beta_diversity.py"
+fi
 log_info "모든 소프트웨어 의존성 확인 완료."
 
 # --- 8. 샘플별 루프 (KneadData 병렬 + Kraken2 순차 하이브리드 적용) ---
@@ -461,6 +468,14 @@ log_info "All QC jobs finished successfully."
 # --- 모든 샘플 처리 후, Bracken 결과 통합 ---
 if [ "$QC_ONLY_MODE" = false ]; then
     merge_bracken_outputs "$BRACKEN_OUT" "$BRACKEN_MERGED_OUT"
+
+    log_info "--- Diversity 분석(Alpha/Beta) 시작 ---"
+    for level in $DIVERSITY_LEVELS; do
+        run_alpha_diversity "$BRACKEN_DIR" "$level" "${DIVERSITY_OUT_BASE}/alpha/${level}"
+        merge_alpha_diversity "${DIVERSITY_OUT_BASE}/alpha/${level}" "${DIVERSITY_OUT_BASE}/alpha_diversity_${level}_summary.tsv"
+        run_beta_diversity "$BRACKEN_DIR" "$level" "${DIVERSITY_OUT_BASE}/beta"
+    done
+    log_info "--- Diversity 분석 완료 ---"
 fi
 
 if [[ -z "${DOKKAEBI_MASTER_COMMAND:-}" ]]; then
