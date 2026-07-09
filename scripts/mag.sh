@@ -471,7 +471,6 @@ for R1_QC_GZ in "${TARGET_SAMPLE_FILES[@]}"; do
     done
 
     (
-        export FULL_THREADS="$THREADS"
         THREADS="$THREADS_PER_JOB"
         MEMORY_GB="$MEMORY_GB_PER_JOB"
 
