@@ -117,10 +117,22 @@ done
 
 # --- 3. 필수 인자 확인 (통합 검사) ---
 declare -a error_messages=()
-if [[ -z "$INPUT_DIR_ARG" ]]; then error_messages+=("  - --input_dir: 입력 디렉토리는 필수입니다."); fi
+if [[ -z "$INPUT_DIR_ARG" ]]; then
+    error_messages+=("  - --input_dir: 입력 디렉토리는 필수입니다.")
+elif [[ ! -d "$INPUT_DIR_ARG" ]]; then
+    error_messages+=("  - --input_dir: '${INPUT_DIR_ARG}' 경로에 디렉토리가 없습니다.")
+fi
 if [[ -z "$OUTPUT_DIR_ARG" ]]; then error_messages+=("  - --output_dir: 출력 디렉토리는 필수입니다."); fi
-if [[ -z "$KRAKEN2_DB_ARG" ]]; then error_messages+=("  - --kraken2_db: Kraken2 데이터베이스 경로는 필수입니다."); fi
-if [[ "$MODE" == "host" && -z "$HOST_DB_ARG" ]]; then error_messages+=("  - --host_db: 'host' 모드에는 호스트 DB 경로가 필수입니다."); fi
+if [[ -z "$KRAKEN2_DB_ARG" ]]; then
+    error_messages+=("  - --kraken2_db: Kraken2 데이터베이스 경로는 필수입니다.")
+elif [[ ! -d "$KRAKEN2_DB_ARG" ]]; then
+    error_messages+=("  - --kraken2_db: '${KRAKEN2_DB_ARG}' 경로에 디렉토리가 없습니다.")
+fi
+if [[ "$MODE" == "host" && -z "$HOST_DB_ARG" ]]; then
+    error_messages+=("  - --host_db: 'host' 모드에는 호스트 DB 경로가 필수입니다.")
+elif [[ "$MODE" == "host" && -n "$HOST_DB_ARG" && ! -d "$(dirname "$HOST_DB_ARG")" ]]; then
+    error_messages+=("  - --host_db: '${HOST_DB_ARG}' 의 상위 경로를 찾을 수 없습니다.")
+fi
 
 if [ ${#error_messages[@]} -gt 0 ]; then
     RED='\033[0;31m'; NC='\033[0m'
@@ -165,6 +177,8 @@ if [[ "$MODE" == "host" ]]; then log_info "Host DB       : ${HOST_DB_ARG}"; fi
 log_info "Threads       : ${THREADS}"
 if [[ "$MODE" == "host" ]]; then log_info "KneadData Memory: ${MEMORY_MB}"; fi
 log_info "------------------------------"
+check_disk_space "$BASE_DIR" "${DISK_SPACE_MIN_GB:-20}"
+
 check_conda_dependency "$KRAKEN_ENV" "kraken2"; check_conda_dependency "$KRAKEN_ENV" "bracken"
 if [[ "$MODE" == "host" ]]; then check_conda_dependency "$KNEADDATA_ENV" "kneaddata"; fi
 if [[ "$MODE" == "environmental" ]]; then check_conda_dependency "$KNEADDATA_ENV" "fastqc"; check_conda_dependency "$FASTP_ENV" "fastp"; fi
@@ -216,8 +230,11 @@ done
 log_info "Starting Pipeline Loop..."
 
 # 상태 모니터링용 폴더 설정
-if [ -d "/dev/shm" ]; then STATUS_DIR="/dev/shm/dokkaebi_status"; else STATUS_DIR="/tmp/dokkaebi_status"; fi
+if [ -d "/dev/shm" ]; then STATUS_DIR="/dev/shm/dokkaebi_status"; else 
+STATUS_DIR="/tmp/dokkaebi_status"; fi
 rm -f "${STATUS_DIR}"/*.status
+
+find "${CLEAN_DIR}" -maxdepth 1 -name ".*.processing" -delete 2>/dev/null || true
 
 TOTAL_FILES=$(find "$RAW_DIR" -maxdepth 1 -name "*_1.fastq.gz" -o -name "*_R1.fastq.gz" | wc -l)
 CURRENT_COUNT=0
@@ -238,10 +255,7 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
     # [수정 2] 샘플 이름 추출 로직도 더 명확하고 안전한 단일 명령어로 변경
     SAMPLE=$(basename "$R1" .fastq.gz | sed -E 's/([._][Rr]?)1$//')
 
-    # printf "\n" >&2; log_info "--- 샘플 '$SAMPLE' 분석 시작 ---"
-    
     CURRENT_COUNT=$((CURRENT_COUNT + 1))
-    #((CURRENT_COUNT++))
     print_progress_bar "$CURRENT_COUNT" "$TOTAL_FILES" "$SAMPLE"
 
     # 각 단계를 위한 성공 플래그 경로를 먼저 정의합니다.
@@ -319,25 +333,12 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
             if [[ "$MODE" == "host" ]]; then
                 set_job_status "$SAMPLE" "Running KneadData (QC)..."
 
-                # KneadData에 사용할 스레드 수를 계산합니다. (입력된 스레드의 절반, 최소 1개 보장)
-                #KNEADDATA_THREADS=$((THREADS / 2))
-                #if (( KNEADDATA_THREADS < 1 )); then
-                #KNEADDATA_THREADS=$((THREADS_PER_JOB / 1.5))
-                #if (( KNEADDATA_THREADS < 1 )); then KNEADDATA_THREADS=1; fi
-                
                 KNEADDATA_THREADS="$THREADS_PER_JOB"
                 if [[ "$KNEADDATA_THREADS" -lt 1 ]]; then KNEADDATA_THREADS=1; fi
-                #log_info "Allocating ${KNEADDATA_THREADS} threads to KneadData (half of the requested ${THREADS})."
-                
+
                 decompressed_files=($(decompress_fastq "$SAMPLE" "$R1" "$R2" "$WORK_DIR"))
                 r1_uncompressed="${decompressed_files[0]}"; r2_uncompressed="${decompressed_files[1]}"
-            
-            #cleaned_files_str=$(run_kneaddata "$SAMPLE" "$r1_uncompressed" "$r2_uncompressed" \
-            #    "$HOST_DB_ARG" "$WORK_DIR" "$CLEAN_DIR" "$KNEADDATA_LOG" \
-            #    "$FASTQC_PRE_QC_DIR" "$FASTQC_POST_QC_DIR" \
-            #    "$THREADS" "$THREADS" "${MEMORY_MB}" "$TRIMMOMATIC_OPTIONS" \
-            #    "$KNEADDATA_EXTRA_OPTS")
-            
+
                 run_kneaddata "$SAMPLE" "$r1_uncompressed" "$r2_uncompressed" \
                     "$HOST_DB_ARG" "$WORK_DIR" "$CLEAN_DIR" "$KNEADDATA_LOG" \
                     "$FASTQC_PRE_QC_DIR" "$FASTQC_POST_QC_DIR" \
@@ -360,12 +361,6 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
                      flock -u 9; exec 9>&- # 슬롯 반납 필수
                      rm -f "$PROCESSING_FLAG"; exit 1
                 fi
-                # Environmental 모드 안에서 QC 결과물 확인
-                #read -r -a cleaned_files <<< "$cleaned_files_str"
-                #if [[ -z "${cleaned_files[0]}" ]]; then
-                #    log_warn "fastp 결과 파일이 생성되지 않았습니다. 샘플을 건너뜁니다."
-                #    continue
-                #fi
             fi
       
             # QC 단계가 성공적으로 끝나면 성공 플래그를 생성합니다.

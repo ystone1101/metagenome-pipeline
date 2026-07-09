@@ -55,6 +55,8 @@ run_megahit() {
         return 0
     fi
 
+    check_disk_space "$assembly_out_dir" "${DISK_SPACE_MIN_GB:-20}"
+
     # 2. 최종 결과는 없지만, 중간 체크포인트 파일이 있으면 --continue 옵션으로 재개
     if [[ -f "$checkpoint_file" ]]; then
         log_info "${sample_name}: Found MEGAHIT checkpoint file. Resuming with --continue option..."
@@ -131,8 +133,7 @@ run_bakta_for_contigs() {
     local sample_name=$1; local assembly_dir=$2; local out_dir=$3; local bakta_db_path=$4; local tmp_dir=$5; local extra_opts="${6:-}"
     
     log_info "${sample_name}: Running Bakta annotation on assembled contigs..."
-#    mkdir -p "$out_dir"
-    
+
     local contig_file="${assembly_dir}/final.contigs.fa"
     local final_gff_file="${out_dir}/${sample_name}.gff3"
 
@@ -146,15 +147,6 @@ run_bakta_for_contigs() {
         return 0
     fi
 
-#    # --- 변경점: 최종 결과 파일 경로를 샘플 디렉토리 바로 아래로 지정 ---
-#    local final_gff_file="${out_dir}/${sample_name}.gff3"
-#
-#    # Checkpoint: 최종 gff3 파일이 있는지 확인
-#    if [[ -f "$final_gff_file" ]]; then
-#        log_info "Bakta annotation for contigs of ${sample_name} already exists. Skipping."
-#        return 0
-#    fi
-    
     local bakta_options=("--threads" "$THREADS" "--meta" "--skip-plot" "--tmp-dir" "$tmp_dir")
     if [[ -n "$bakta_db_path" ]]; then
         bakta_options+=(--db "$bakta_db_path")
@@ -164,13 +156,6 @@ run_bakta_for_contigs() {
         log_info "Previous incomplete output found. Overwriting..."
         bakta_options+=(--force)
     fi
-
-#    conda run -n "$BAKTA_ENV" bakta \
-#        --output "$out_dir" \
-#        --prefix "$sample_name" \
-#        "${bakta_options[@]}" \
-#        $extra_opts \
-#        "$contig_file"
 
     # [수정 3] Conda Activate 방식 적용 (Conda 경로 자동 탐지)
     (
@@ -224,6 +209,8 @@ run_bakta_for_mags() {
         return 0
     fi
     touch "$checkpoint_file"
+
+    rm -f "${out_dir}"/*.processing
     
     local total_bins=$(ls -1 "${bins_dir}"/*.fa 2>/dev/null | wc -l)
     if [[ "$total_bins" -eq 0 ]]; then
@@ -279,73 +266,22 @@ run_bakta_for_mags() {
     wait
     
     # 완료 표시
-    log_info "Finished annotating all MAGs for ${sample_name}."
-    echo "done" >> "$checkpoint_file"
+    local all_bins_done=true
+    for bin_file in "${bins_dir}"/*.fa; do
+        [[ -f "$bin_file" ]] || continue
+        local base_name=$(basename "$bin_file" .fa)
+        if ! grep -Fxq "$base_name" "$checkpoint_file"; then
+            all_bins_done=false
+            break
+        fi
+    done
+    if [[ "$all_bins_done" == true ]]; then
+        log_info "Finished annotating all MAGs for ${sample_name}."
+        echo "done" >> "$checkpoint_file"
+    else
+        log_warn "Some MAGs for ${sample_name} failed or were interrupted. Will retry remaining bins on next cycle."
+    fi
 }
-
-#run_bakta_for_mags() {
-#    local sample_name=$1; local bins_dir=$2; local out_dir=$3; local bakta_db_path=$4; local tmp_dir=$5; local extra_opts="${6}"
-#    log_info "${sample_name}: Running Bakta annotation on final MAGs..."#
-#
-#    mkdir -p "$out_dir"
-#
-#    local checkpoint_file="${out_dir}/bakta_checkpoint.txt"
-#
-#    # --- ✨ 1. 최종 완료 여부 우선 확인 ---
-#    # checkpoint 파일에 'done'이라는 완료 표시가 있으면, 더 이상 확인하지 않고 즉시 건너뜁니다.
-#    if [[ -f "$checkpoint_file" ]] && grep -Fxq "done" "$checkpoint_file"; then
-#        log_info "All MAGs for ${sample_name} have already been annotated by Bakta (found 'done' marker). Skipping."
-#        return 0
-#    fi
-#    
-#    # checkpoint 파일이 없으면 새로 생성합니다.
-#    touch "$checkpoint_file"
-#    
-#    # 처리할 bin 파일이 하나도 없는 경우를 대비
-#    local total_bins=$(ls -1 "${bins_dir}"/*.fa 2>/dev/null | wc -l)
-#    if [[ "$total_bins" -eq 0 ]]; then
-#        log_warn "No bins found in ${bins_dir} to annotate. Marking as complete and skipping."
-#        echo "done" > "$checkpoint_file"
-#        return 0
-#    fi
-#
-#    # 3. 각 Bin 파일에 대해 반복 작업 수행
-#    for bin_file in "${bins_dir}"/*.fa; do
-#        if [[ ! -f "$bin_file" ]]; then continue; fi
-#        
-#        local base_name=$(basename "$bin_file" .fa)
-#        
-#        # --- ✨ 2. 'done' 표시가 없을 경우, 개별 Bin 완료 여부 확인 ---
-#        # checkpoint 파일에서 현재 bin 이름이 있는지 확인하고, 있으면 건너뜁니다.
-#        if grep -Fxq "$base_name" "$checkpoint_file"; then
-#            continue
-#        fi
-#
-#        local bakta_output_subdir="${out_dir}/${base_name}"
-#        local final_gff_file="${bakta_output_subdir}/${base_name}.gff3"
-#        
-#        local bakta_options=("--threads" "$THREADS" "--skip-plot" "--tmp-dir" "$tmp_dir")
-#        if [[ -n "$bakta_db_path" ]]; then
-#            bakta_options+=(--db "$bakta_db_path")
-#        fi
-#        if [[ -d "$bakta_output_subdir" && ! -f "$final_gff_file" ]]; then
-#            log_warn "Incomplete Bakta output for ${base_name}. Re-running with --force."
-#            bakta_options+=(--force)
-#        fi
-#        
-#        log_info "  - Annotating MAG: ${base_name}..."
-#        if conda run -n "$BAKTA_ENV" bakta --output "$bakta_output_subdir" --prefix "$base_name" "${bakta_options[@]}" "$bin_file" $extra_opts; then
-#            echo "$base_name" >> "$checkpoint_file"
-#        else
-#            log_warn "Bakta annotation failed for ${base_name}."
-#        fi
-#    done
-#    
-#    # --- ✨ 3. 모든 작업 완료 후 'done' 표식 기록 ---
-#    # for 루프가 성공적으로 모두 끝나면, checkpoint 파일 마지막에 'done'을 추가합니다.
-#    log_info "Finished annotating all MAGs for ${sample_name}. Marking as complete."
-#    echo "done" >> "$checkpoint_file"
-# }
 
 #--- MetaWRAP Pipeline Function for a single sample ---
 run_metawrap_sample() {
@@ -379,6 +315,8 @@ run_metawrap_sample() {
 
     local read_qc_dir="${metawrap_sample_dir}/read_qc"
     local temp_uncompressed_dir="${metawrap_sample_dir}/temp_uncompressed_reads"
+
+    check_disk_space "$metawrap_sample_dir" "${DISK_SPACE_MIN_GB:-20}"
 
     # 1. pigz를 사용하여 복구된 파일을 MetaWRAP용으로 압축 해제
     mkdir -p "$temp_uncompressed_dir"
@@ -417,8 +355,8 @@ run_metawrap_sample() {
     log_info "${sample_name}: Running MetaWRAP bin_refinement module..."
     conda run -n "$METAWRAP_ENV" metawrap bin_refinement -o "${metawrap_sample_dir}/bin_refinement" -t "$THREADS" \
         -A "${initial_bins_dir}/metabat2_bins/" -B "${initial_bins_dir}/maxbin2_bins/" \
-        -C "${initial_bins_dir}/concoct_bins/" -c "$min_completeness" -x "$max_contamination" $refinement_extra_opts "$LOG_FILE" 2>&1
-        
+        -C "${initial_bins_dir}/concoct_bins/" -c "$min_completeness" -x "$max_contamination" $refinement_extra_opts >> "$LOG_FILE" 2>&1
+
     if [[ ! -d "$final_bins_dir" ]]; then
         log_warn "MetaWRAP bin_refinement failed for ${sample_name}."
         return 1
@@ -647,7 +585,7 @@ run_eggnog_on_contigs() {
 
 # --- [내부 함수] 주석 비율 계산기 (유지) ---
 check_annotation_ratio() {
-    local sample=$1; local prot_file=$2; local annot_file=$3, local csv_file="${4:-}"
+    local sample=$1; local prot_file=$2; local annot_file=$3; local csv_file="${4:-}"
     
     # 파일이 존재하는지 먼저 확인
     if [[ -f "$prot_file" && -f "$annot_file" ]]; then

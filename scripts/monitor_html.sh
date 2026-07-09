@@ -1,13 +1,17 @@
 #!/bin/bash
 
 # ==============================================================================
-# 1. 설정 (경로 확인 필수!)
+# 1. 설정 (BASE_DIR / RAW_DATA_DIR 환경변수로 오버라이드 가능)
+#   예: BASE_DIR=/data/my_project/results RAW_DATA_DIR=/data/my_project/raw_data bash scripts/monitor_html.sh
 # ==============================================================================
-BASE_DIR="/data/CDC_2024ER110301/results"
-RAW_DATA_DIR="/data/CDC_2024ER110301/raw_data"
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+PROJECT_ROOT_DIR=$(dirname "$SCRIPT_DIR")
+
+BASE_DIR="${BASE_DIR:-/data/CDC_2024ER110301/results}"
+RAW_DATA_DIR="${RAW_DATA_DIR:-/data/CDC_2024ER110301/raw_data}"
 WEB_DIR="${BASE_DIR}/web_monitor/Dokkaebi_Pipeline/Monitor_V2"
 
-QC_SCRIPT="/home/dnalink/Desktop/GDM/metagenome-pipeline/lib/generate_qc_report.py"
+QC_SCRIPT="${PROJECT_ROOT_DIR}/lib/generate_qc_report.py"
 LOG_DIR="${BASE_DIR}/1_microbiome_taxonomy/logs/kneaddata_logs/"
 QC_OUTPUT_CSV="${BASE_DIR}/1_microbiome_taxonomy/KneadData_QC_Summary.csv"
 KRAKEN_SUMMARY="${BASE_DIR}/1_microbiome_taxonomy/kraken2_summary.tsv"

@@ -106,6 +106,24 @@ check_system_dependency() {
     log_info "'$cmd' 명령어 확인 완료."
 }
 
+#--- 디스크 여유 공간 확인 함수 (경고만 남기고 작업은 막지 않음) ---
+check_disk_space() {
+    local check_path=$1; local min_gb="${2:-20}"
+    local check_dir="$check_path"
+    [[ -d "$check_dir" ]] || check_dir=$(dirname "$check_dir")
+
+    local avail_kb
+    avail_kb=$(df -Pk "$check_dir" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [[ -z "$avail_kb" ]]; then
+        return 0
+    fi
+
+    local avail_gb=$(( avail_kb / 1024 / 1024 ))
+    if (( avail_gb < min_gb )); then
+        log_warn "디스크 여유 공간 부족 경고: ${check_dir} 에 ${avail_gb}GB 남음 (권장 최소 ${min_gb}GB). 작업은 계속 진행됩니다."
+    fi
+}
+
 # --- 4. 파이프라인 개별 단계 함수들 ---
 #--- 압축 해제 함수 ---
 decompress_fastq() {

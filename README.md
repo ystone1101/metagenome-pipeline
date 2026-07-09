@@ -4,12 +4,12 @@
 
 # Dokkaebi Metagenome Pipeline
 
-![GitHub stars](https://img.shields.io/github/stars/your-username/your-repo-name?style=social)
-![GitHub forks](https://img.shields.io/github/forks/your-username/your-repo-name?style=social)
-![GitHub last commit](https://img.shields.io/github/last-commit/your-username/your-repo-name)
+![GitHub stars](https://img.shields.io/github/stars/ystone1101/metagenome-pipeline?style=social)
+![GitHub forks](https://img.shields.io/github/forks/ystone1101/metagenome-pipeline?style=social)
+![GitHub last commit](https://img.shields.io/github/last-commit/ystone1101/metagenome-pipeline)
 ![Made with Bash](https://img.shields.io/badge/Made%20with-Bash-1f425f.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](https://github.com/your-username/your-repo-name/releases/tag/v1.0.0)
+[![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](https://github.com/ystone1101/metagenome-pipeline/releases/tag/v1.0.0)
 
 **Dokkaebi (도깨비)** is a powerful and automated pipeline for recovering high-quality Metagenome-Assembled Genomes (MAGs) from shotgun metagenome sequencing data. From preprocessing raw reads to the final annotation of MAGs, it integrates a complex analysis process into a single command, providing a reproducible and efficient workflow.
 
@@ -90,31 +90,43 @@ Users can select their desired depth of analysis through three flexible modes—
 #### Step 1: Clone the Repository
 
 ```bash
-git clone [https://github.com/ystone1101/metagenome-pipeline.git](https://github.com/ystone1101/metagenome-pipeline.git)
+git clone https://github.com/ystone1101/metagenome-pipeline.git
 cd metagenome-pipeline
 ```
 
 #### Step 2: Create Conda Environments
 
-<details>
-<summary><b>➡️ Click here to see Conda environment setup commands</b></summary>
-
-
-The pipeline runs in several independent Conda environments. Create the required environments using the commands below. (The environment names must match those specified in the `config/*.sh` files.)
+The `environments/` directory contains version-pinned `conda env export` files for
+every tool the pipeline calls, so a single script sets up (or updates) all nine
+Conda environments in one go:
 
 ```bash
-# Create environments for each tool (examples)
-conda create -n KneadData_env -c bioconda kneaddata -y
-conda create -n kraken_env -c bioconda kraken2 bracken -y
-conda create -n fastp_env -c bioconda fastp -y
-conda create -n megahit_env -c bioconda megahit -y
-conda create -n metawrap_env -c bioconda metawrap-mg -y
-conda create -n gtdbtk_env -c bioconda gtdbtk -y
-conda create -n bakta_env -c bioconda bakta -y
-# ... and other necessary tools (bbmap, samtools, etc.)
+bash install.sh
+```
+
+<details>
+<summary><b>➡️ Manual / per-tool setup (if you prefer not to use install.sh)</b></summary>
+
+The pipeline runs in several independent Conda environments. (The environment
+names must match those specified in the `config/*.sh` files.)
+
+```bash
+conda env create -f environments/kneaddata_env.yml
+conda env create -f environments/fastp_env.yml
+conda env create -f environments/kraken_env.yml
+conda env create -f environments/bbmap_env.yml
+conda env create -f environments/megahit_env.yml
+conda env create -f environments/metawrap_env.yml
+conda env create -f environments/gtdbtk_env.yml
+conda env create -f environments/bakta_env.yml
+conda env create -f environments/eggnog_env.yml
 ```
 
 </details>
+
+Alternatively, prebuilt Dockerfiles for each tool (built directly from the same
+pinned `environments/*.yml` files) are available under `docker/` — see
+`docker/README.md` for build and Singularity/Apptainer conversion instructions.
 
 #### Step 3: Grant Execute Permissions
 
@@ -141,7 +153,7 @@ The pipeline is designed to run in the background (e.g., using tmux or nohup).
   - **Commands**: `qc`, `mag`, `all`
   - **Modes**:
       - `qc` command: `host` or `environmental`
-      - `mag` command: `all`, `megahit`, `metawrap`, `post-process`
+      - `mag` command: `all`, `megahit`, `metawrap`, `binning`, `annotation`, `post-process`
 
 #### Example 1: `qc` - Host-associated samples
 
@@ -238,6 +250,13 @@ When the `all` command is executed, the specified output directory will have the
   - **Pangenome Analysis**: Add a pangenome analysis pipeline using `Roary` or `PPanGGOLiN`.
   - **Metabolic Pathway Analysis**: Add a metabolic pathway reconstruction pipeline using `KEGG` or `MetaCyc` databases.
   - **Visualization**: Develop an interactive results visualization dashboard using `R/Shiny` or `Python/Dash`.
+
+-----
+
+## Citation
+
+If you use Dokkaebi in your work, please cite it using the metadata in
+[`CITATION.cff`](CITATION.cff).
 
 -----
 
