@@ -83,7 +83,7 @@ log_error() {
 
 # --- 2. 에러 트랩 정의 ---
 _error_handler() {
-    local exit_code="$?"; local command="${BASH_COMMAND}"; local script_name="${BASH_SOURCE[0]}"; local line_number="${LINENO}"
+    local exit_code="$?"; local command="${BASH_COMMAND}"; local script_name="${BASH_SOURCE[0]}"; local line_number="${BASH_LINENO[0]}"
     local error_block=$'\n'"---------------------------------\n[ERROR] 스크립트 오류 발생!\n  - 스크립트: ${script_name}\n  - 라인 번호: ${line_number}\n  - 종료 코드: ${exit_code}\n  - 실패한 명령어: '${command}'\n---------------------------------"
     printf "${RED}%s${NC}\n" "$error_block" >&2; printf "%s\n" "$error_block" >> "$LOG_FILE"; exit "${exit_code}"
 }
