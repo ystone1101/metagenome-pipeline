@@ -249,7 +249,15 @@ CURRENT_COUNT=0
 declare -a PIDS=()
 
 for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
-    # --- 샘플 정보 파싱 --- 
+    # [종료 신호] 새 샘플 투입만 중단합니다. 이미 백그라운드로 실행 중인 작업은
+    # 루프 뒤의 wait에서 정상적으로 끝까지 마칩니다.
+    # (신호 파일 삭제는 run_all.sh가 담당하므로 여기서는 지우지 않습니다)
+    if [ -f "${RAW_DIR}/stop_pipeline" ]; then
+        log_warn "Stop signal detected. 새 QC 샘플 투입을 중단합니다 (실행 중인 작업은 완료 후 종료)."
+        break
+    fi
+
+    # --- 샘플 정보 파싱 ---
     # [수정 1] R2 경로 생성 로직을 파일 끝에 고정된 단일 명령어로 단순화
     R2=$(echo "$R1" | sed -E 's/([._][Rr]?)1(\.fastq\.gz)$/\12\2/')
     # 2. R2 파일이 실제로 존재하는지 확인
@@ -281,7 +289,13 @@ for R1 in "$RAW_DIR"/*{_1,_R1,.1,.R1}.fastq.gz; do
     if [ -f "$PROCESSING_FLAG" ]; then continue; fi
 
     # [신규 추가] 대기열 관리 (서버 과부하 방지)
-    while [ $(jobs -p | wc -l) -ge "$MAX_PENDING_JOBS" ]; do 
+    while [ $(jobs -p | wc -l) -ge "$MAX_PENDING_JOBS" ]; do
+        # 슬롯을 기다리는 동안에도 종료 신호를 감지해야 최대 60초 안에 반응합니다.
+        # break 2 → 대기 루프와 바깥 for 루프를 함께 탈출 (새 샘플 투입 중단)
+        if [ -f "${RAW_DIR}/stop_pipeline" ]; then
+            log_warn "Stop signal detected (슬롯 대기 중). 새 QC 샘플 투입을 중단합니다."
+            break 2
+        fi
         sleep 60
         # 대기 중에도 화면 갱신 (상태 변화 반영)
         print_progress_bar "$CURRENT_COUNT" "$TOTAL_FILES" "Waiting..."

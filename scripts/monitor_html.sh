@@ -21,6 +21,17 @@ PLOT_LOG="${WEB_DIR}/plot_debug.log"
 
 mkdir -p "$WEB_DIR"
 
+# 진행 상황 로그 (nohup 로그에서 어느 단계인지 바로 확인 가능)
+mlog() { echo "[MONITOR $(date '+%H:%M:%S')] $1"; }
+
+# 중복 실행 방지: 이미 돌고 있는 인스턴스가 있으면 조용히 종료합니다.
+# (여러 개가 동시에 index.html / 임시파일을 건드리면 결과가 꼬입니다)
+exec 200>"/tmp/dokkaebi_monitor_html.lock"
+if ! flock -n 200; then
+    mlog "이미 실행 중인 monitor_html.sh가 있습니다. 이 인스턴스는 종료합니다."
+    exit 0
+fi
+
 # ==============================================================================
 # 2. Python Script (들여쓰기 오류 방지용 왼쪽 정렬 버전)
 # ==============================================================================
@@ -32,9 +43,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.cm as cm # 컬러맵 사용을 위해 추가
+import traceback
 
-# 에러 로그 기록
-sys.stderr = open('plot_debug.log', 'w')
+# 에러 로그 기록 (output_dir 기준 절대경로. 상대경로였다가 실행 위치에 따라
+# 엉뚱한 곳에 쌓이던 문제를 고쳤습니다)
+_log_dir = sys.argv[3] if len(sys.argv) >= 4 else '.'
+sys.stderr = open(os.path.join(_log_dir, 'plot_debug.log'), 'w')
 
 try:
     if len(sys.argv) < 5: sys.exit(1)
@@ -171,19 +185,25 @@ try:
             df_egg = df_egg.sort_values(by='Ratio(%)', ascending=True)
             colors = [COLOR_PASS if r >= 80 else (COLOR_WARN if r >= 50 else COLOR_FAIL) for r in df_egg['Ratio(%)']]
             ax.barh(df_egg['Sample_ID'], df_egg['Ratio(%)'], color=colors)
+            # 샘플이 1개뿐일 때 matplotlib의 categorical barh 축이 bottom==top으로
+            # 계산되어 "bottom cannot be >= top" 에러를 내는 경우가 있어 명시적으로 고정
+            if len(df_egg) == 1:
+                ax.set_ylim(-0.5, 0.5)
+            ax.set_xlim(0, max(100, df_egg['Ratio(%)'].max() * 1.05))
             ax.set_title('Contig Annotation Rate (EggNOG)', fontweight='bold')
             plt.tight_layout()
             plt.savefig(os.path.join(output_dir, 'eggnog_rate.png'), dpi=150)
             plt.close()
 
 except Exception as e:
-    print(str(e), file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
 PY_EOF
 
 # ==============================================================================
 # 3. 메인 루프 (사용자 원본 카운팅 로직 100% 복구 ✨)
 # ==============================================================================
 while true; do
+    mlog "--- 사이클 시작 ---"
     # --------------------------------------------------------------------------
     # [데이터 수집] - 사용자 원본 로직 그대로
     # --------------------------------------------------------------------------
@@ -266,6 +286,12 @@ while true; do
     # ==========================================================================
     E_SUMMARY_FILE="${BASE_DIR}/2_mag_analysis/eggnog_annotation_summary.csv"
     E_BUILD_FILE="${E_SUMMARY_FILE}.tmp"
+    # [성능] 이미 계산한 샘플을 매 사이클마다 다시 grep하지 않도록 캐시를 둡니다.
+    # 캐시 형식(TSV): 샘플명 <TAB> annotations파일 mtime <TAB> 완성된 CSV 한 줄
+    # mtime을 키에 포함하므로 주석 결과가 갱신되면 자동으로 재계산됩니다.
+    E_CACHE_FILE="${BASE_DIR}/2_mag_analysis/.eggnog_summary.cache"
+    touch "$E_CACHE_FILE"
+    mlog "EggNOG 주석 비율 집계 중... (최초 1회는 오래 걸리고, 이후에는 캐시로 즉시 완료됩니다)"
 
     # 1. 파일이 없으면 헤더 생성
     echo "Sample_ID,Total_Genes,Annotated_Genes,Ratio(%),Status" > "$E_BUILD_FILE"
@@ -274,18 +300,29 @@ while true; do
     find "$MAG_BASE" -path "*/04_eggnog_on_contigs/*/*.emapper.annotations" 2>/dev/null | while read -r annot_file; do
         s_name=$(basename "$annot_file" .emapper.annotations)
         prot_file="${annot_file%.emapper.annotations}.faa"
-        
+
         if [ -f "$prot_file" ]; then
-            # 전체 유전자 수 (FAA 파일 기준)
-            t_g=$(grep -c "^>" "$prot_file")
+            a_mtime=$(stat -c %Y "$annot_file" 2>/dev/null)
+
+            # 캐시 적중 시 무거운 grep을 건너뜁니다.
+            cached_line=$(awk -F'\t' -v s="$s_name" -v m="$a_mtime" '$1==s && $2==m {print $3; exit}' "$E_CACHE_FILE" 2>/dev/null)
+            if [ -n "$cached_line" ]; then
+                echo "$cached_line" >> "$E_BUILD_FILE"
+                continue
+            fi
+
+            # 전체 유전자 수 (FAA 파일 기준). LC_ALL=C는 대용량 텍스트 grep을 크게 가속합니다.
+            t_g=$(LC_ALL=C grep -c "^>" "$prot_file")
             # 주석된 유전자 수 (#으로 시작하는 헤더 제외)
-            a_g=$(grep -v "^#" "$annot_file" | wc -l)
-            
+            a_g=$(LC_ALL=C grep -cv "^#" "$annot_file")
+
             if [ "$t_g" -gt 0 ]; then
                 ratio=$(echo "scale=2; ($a_g * 100) / $t_g" | bc -l)
                 is_ok=$(echo "$ratio >= 80.00" | bc -l)
                 [ "$is_ok" -eq 1 ] && stat_msg="PASS" || stat_msg="WARNING"
-                echo "${s_name},${t_g},${a_g},${ratio},${stat_msg}" >> "$E_BUILD_FILE"
+                new_line="${s_name},${t_g},${a_g},${ratio},${stat_msg}"
+                echo "$new_line" >> "$E_BUILD_FILE"
+                printf '%s\t%s\t%s\n' "$s_name" "$a_mtime" "$new_line" >> "$E_CACHE_FILE"
             fi
         fi
     done
@@ -458,6 +495,7 @@ while true; do
     find "${MAG_BASE}" -path "*/02_assembly_stats/*_stats.txt" > "${WEB_DIR}/stat_files.list"
 
     # 2. 파이썬 스크립트 실행 (재료가 다 준비된 상태에서 실행)
+    mlog "그래프 생성 중..."
     python3 "$PLOT_SCRIPT" "${WEB_DIR}/qc_summary.csv" "${WEB_DIR}/kraken2_summary.tsv" "$WEB_DIR" "$TOTAL_SAMPLES" > "$PLOT_LOG" 2>&1
 
     # [추가] 이미지 캐시 갱신용 타임스탬프
@@ -676,5 +714,6 @@ while true; do
 </html>
 EOF
     rm /tmp/h_start.txt /tmp/h_end.txt /tmp/h_candidates.txt 2>/dev/null
+    mlog "--- 사이클 완료. index.html 갱신됨 → ${WEB_DIR}/index.html ---"
     sleep 7200
 done

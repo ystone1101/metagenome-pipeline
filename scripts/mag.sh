@@ -470,10 +470,22 @@ for TARGET_IDX in "${!TARGET_SAMPLE_FILES[@]}"; do
         break
     fi
 
+    # [종료 신호] run_all.sh가 --raw_input_dir로 넘겨준 원본 입력 폴더의 stop_pipeline을
+    # 확인합니다. 새 샘플 투입만 멈추고, 실행 중인 작업은 아래 wait에서 정상 완료됩니다.
+    # (신호 파일 삭제는 run_all.sh가 담당하므로 여기서는 지우지 않습니다)
+    if [[ -n "$RAW_INPUT_DIR" && -f "${RAW_INPUT_DIR}/stop_pipeline" ]]; then
+        log_warn "Stop signal detected. 새 MAG 샘플 투입을 중단합니다 (실행 중인 작업은 완료 후 종료)."
+        break
+    fi
+
     while [ $(jobs -p | grep -v "${DASHBOARD_PID:-IGNORE}" | wc -l) -ge "$MAX_MAG_JOBS" ]; do
         if [ -f "$RESTART_SIGNAL_FILE" ]; then
             log_warn "Restart signal detected while waiting for slots."
-            break 2 
+            break 2
+        fi
+        if [[ -n "$RAW_INPUT_DIR" && -f "${RAW_INPUT_DIR}/stop_pipeline" ]]; then
+            log_warn "Stop signal detected (슬롯 대기 중). 새 MAG 샘플 투입을 중단합니다."
+            break 2
         fi
         sleep 10
     done

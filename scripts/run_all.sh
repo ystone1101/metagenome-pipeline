@@ -256,6 +256,15 @@ while true; do
     # [1단계] QC 무한 루프
     # -------------------------------------------------------
     while true; do
+        # [종료 신호] QC를 새로 시작(또는 재시작)하기 전에 확인합니다.
+        # qc.sh 자체도 내부 루프에서 같은 신호를 보고 새 샘플 투입을 멈추므로,
+        # 여기서는 "끝난 뒤 새 파일이 생겨 다시 호출되는 것"을 막는 역할입니다.
+        # (신호 파일 삭제는 루프 맨 끝의 종료 처리 블록이 담당합니다)
+        if [ -f "${INPUT_DIR}/stop_pipeline" ]; then
+            log_warn "Stop signal detected. Phase 1(QC)을 더 진행하지 않습니다."
+            break
+        fi
+
         log_info "--- [Phase 1] Running QC Pipeline (Attempt: $((QC_RETRY_COUNT+1))) ---"
 
         P1_CMD_ARRAY=(
@@ -323,7 +332,10 @@ while true; do
     # [1.2단계] 자가 치유 (Auto-Repair) :: QC/Taxonomy 누락분 즉시 복구 🚑
     # ==============================================================================
     # Phase 1 종료 후, MAG로 넘어가기 전에 누락된 Taxonomy 결과를 복구합니다.
-    if [ -f "${PROJECT_ROOT_DIR}/scripts/auto_repair.sh" ]; then
+    # (종료 신호가 있으면 Kraken2 재실행이 포함된 복구 작업을 새로 시작하지 않습니다)
+    if [ -f "${INPUT_DIR}/stop_pipeline" ]; then
+        log_warn "Stop signal detected. Auto-Repair를 건너뜁니다."
+    elif [ -f "${PROJECT_ROOT_DIR}/scripts/auto_repair.sh" ]; then
         log_info "--- [Phase 1.2] Verifying Phase 1 Completeness & Auto-Repairing ---"
         # 현재 설정된 출력 경로, DB 경로, 스레드 수를 넘겨줍니다.
         bash "${PROJECT_ROOT_DIR}/scripts/auto_repair.sh" "$OUTPUT_DIR" "$KRAKEN2_DB" "$THREADS"
@@ -417,7 +429,7 @@ while true; do
     # [2단계 개조] MAG 분석 실행 및 낙오자 정밀 타격 모드 (Smart Recovery Mode)
     # -------------------------------------------------------
     log_info "--- [Phase 2] Checking for pending/failed MAG jobs ---"
-    
+
     # 1. 미완료 샘플 싹 긁어모으기 및 단계별 정밀 진단 (AS 분류)
     PENDING_ALL=()       # 아예 처음(all)부터 돌려야 하는 완전히 새로운 샘플
     PENDING_BINNING=()   # Assembly는 끝났으나 Binning 단계에서 낙오된 샘플
@@ -448,6 +460,13 @@ while true; do
     done
 
     TOTAL_PENDING=$(( ${#PENDING_ALL[@]} + ${#PENDING_BINNING[@]} + ${#PENDING_ANNOT[@]} ))
+
+    # [종료 신호] 기존 체크는 배치가 "끝난 뒤"에만 있어서, 신호를 줘도 새 배치가
+    # 통째로(수 시간) 한 번 돌고 나서야 멈췄습니다. 배치 착수 전에 먼저 확인합니다.
+    if [ -f "${INPUT_DIR}/stop_pipeline" ] && [ "$TOTAL_PENDING" -gt 0 ]; then
+        log_warn "Stop signal detected. 대기 중인 ${TOTAL_PENDING}개 MAG 작업을 시작하지 않고 종료합니다."
+        TOTAL_PENDING=0
+    fi
 
     # 2. 작업 대기열 가동 (기존 배치 프레임워크 100% 재사용)
     if [ "$TOTAL_PENDING" -gt 0 ]; then
